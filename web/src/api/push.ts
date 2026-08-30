@@ -20,6 +20,15 @@ function urlBase64ToArrayBuffer(base64: string): ArrayBuffer {
   return buf.buffer;
 }
 
+/** Compare two ArrayBuffers byte for byte. */
+function buffersEqual(a: ArrayBuffer | null, b: ArrayBuffer | null): boolean {
+  if (!a || !b || a.byteLength !== b.byteLength) return false;
+  const x = new Uint8Array(a);
+  const y = new Uint8Array(b);
+  for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return false;
+  return true;
+}
+
 export function pushSupported(): boolean {
   return (
     typeof navigator !== 'undefined' &&
@@ -56,12 +65,22 @@ async function subscribeAndRegister(): Promise<boolean> {
   const { key, enabled } = await fetchVapid();
   if (!enabled || !key) return false;
 
-  const existing = await reg.pushManager.getSubscription();
+  const serverKey = urlBase64ToArrayBuffer(key);
+  let existing = await reg.pushManager.getSubscription();
+
+  // A subscription created against an older VAPID key is silently dead — the push
+  // service rejects every send with 403. Drop and re-subscribe when the key
+  // differs. This is the usual cause of "push stopped working after a redeploy".
+  if (existing && !buffersEqual(existing.options.applicationServerKey ?? null, serverKey)) {
+    await existing.unsubscribe().catch(() => {});
+    existing = null;
+  }
+
   const sub =
     existing ??
     (await reg.pushManager.subscribe({
       userVisibleOnly: true,
-      applicationServerKey: urlBase64ToArrayBuffer(key),
+      applicationServerKey: serverKey,
     }));
 
   const json = sub.toJSON();

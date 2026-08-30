@@ -95,10 +95,13 @@
     "user": { "id": "…", "email": "teacher@example.com", "displayName": "李老师", "avatarUrl": null },
     "accessToken": "eyJhbGci…",
     "refreshToken": "rt_9f2c…",
+    "sessionId": "…",
     "expiresIn": 7200
   }
 }
 ```
+
+`sessionId` 是本次登录对应的 refresh-token 会话 id，前端存下后可在设备管理页标记「本机」。
 
 错误：`409 CONFLICT`（邮箱已注册）、`400 VALIDATION_ERROR`（密码强度不足）
 
@@ -125,7 +128,7 @@
 响应 `200`：
 
 ```json
-{ "data": { "accessToken": "eyJ…", "refreshToken": "rt_new…", "expiresIn": 7200 } }
+{ "data": { "accessToken": "eyJ…", "refreshToken": "rt_new…", "sessionId": "…", "expiresIn": 7200 } }
 ```
 
 > 采用 rotation：旧 refreshToken 立即失效。若检测到已失效的 token 被复用，撤销该用户全部 token 并返回 `401`。
@@ -149,7 +152,8 @@
     "id": "…", "email": "teacher@example.com", "displayName": "李老师",
     "avatarUrl": null,
     "settings": { "periodsPerDay": 8, "showWeekend": false,
-      "gradeThresholds": { "excellent": 0.85, "good": 0.75, "pass": 0.6 } },
+      "gradeThresholds": { "excellent": 0.85, "good": 0.75, "pass": 0.6 },
+      "daySchedule": [ { "key": "p1", "kind": "lesson", "label": "第1节", "start": "08:00", "end": "08:45", "period": 1 } ] },
     "createdAt": "2026-08-01T09:00:00Z"
   }
 }
@@ -161,6 +165,10 @@
 
 请求（字段均可选）：`{ "displayName": "李老师", "avatarUrl": "https://…", "settings": { "periodsPerDay": 9 } }`
 响应 `200`：同 `GET /auth/me`
+
+`settings.daySchedule` 为作息时间表：每项 `{ key, kind: "lesson"|"activity", label, start: "HH:MM", end: "HH:MM" }`，
+服务端会按 `start` 排序并给 `kind: "lesson"` 的项自动编号 `period`（1..N）。
+`start >= end` 或时间格式非法 → `400 VALIDATION_ERROR`。旧账号无此字段时按默认作息处理。
 
 ---
 
@@ -344,10 +352,16 @@ Query：`date=2026-09-14`（必填）或 `from=…&to=…`（区间，最长 31 
   "data": [{
     "date": "2026-09-14", "weekday": 1, "weekParity": "odd",
     "lessons": [{
-      "slotId": "slt_…", "period": 2, "startTime": "08:55", "endTime": "09:40",
+      "slotId": "slt_…", "period": 2, "startTime": "09:00", "endTime": "09:45",
       "subject": "数学", "classId": "cls_…", "className": "高二(3)班",
       "classColor": "#3B82F6", "location": "教学楼A301"
     }],
+    "timeline": [
+      { "kind": "activity", "label": "早读", "start": "07:30", "end": "07:50" },
+      { "kind": "lesson", "label": "第1节", "start": "08:00", "end": "08:45",
+        "period": 1, "slotId": null, "subject": null, "classId": null,
+        "className": null, "classColor": null, "location": null }
+    ],
     "events": [{
       "id": "evt_…", "title": "收作业本", "startAt": "2026-09-14T09:00:00Z",
       "allDay": false, "isDone": false, "classId": "cls_…"
@@ -357,6 +371,10 @@ Query：`date=2026-09-14`（必填）或 `from=…&to=…`（区间，最长 31 
 ```
 
 > 后端负责按 `repeatRule` 与学期区间过滤单双周，前端直接渲染。
+>
+> `timeline` 按用户作息时间表（`settings.daySchedule`）逐时段展开、按 `start` 升序：
+> `kind: "activity"` 是眼操 / 午餐 / 午休 / 大课间等固定事件；`kind: "lesson"` 合并
+> 了当天该节次的排课（无排课时 `slotId` 等为 `null`）。`lessons` 仍保留供旧客户端使用。
 
 ---
 
@@ -750,6 +768,37 @@ Query：`format`（`csv` | `xlsx`，默认 `csv`）、`examIds`（逗号分隔�
 
 未配置 VAPID 时，`enabled` 为 `false`，其余接口仍可调用但不会实际下发通知。
 
+投递说明：`sendNotification` 带 `TTL: 3600`；返回 `404/410` 视为订阅失效，删除该行；
+其余错误（如 VAPID 密钥轮换后的 `403`）记 `warn` 日志。前端 `subscribeAndRegister`
+会比对已有订阅的 `applicationServerKey` 与服务端公钥，不一致时自动退订并重新订阅
+（这是「换了 VAPID 密钥后推送全废」的常见原因）。
+
+---
+
+## 13.2 设备管理 Devices
+
+列出并管理当前账号关联的设备。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/devices` | `{ "data": { "pushEnabled", "subscriptions": [{ id, label, userAgent, createdAt, lastSeenAt }], "sessions": [{ id, deviceInfo, createdAt, expiresAt }] } }`。不返回推送 endpoint / 密钥 / token 哈希。 |
+| DELETE | `/devices/subscriptions/{id}` | 移除一条推送订阅 → `204`。他人订阅 → `403`。 |
+| DELETE | `/devices/sessions/{id}` | 吊销一个登录会话（refresh token）→ `204`。该设备下次请求返回 `401`。 |
+
+`sessions` 里的 `id` 与登录 / 刷新响应新增的 `sessionId` 对应，前端据此标记「本机」。
+
+## 13.3 天气 Weather
+
+首页天气卡片的数据代理。数据源 Open-Meteo（免费、无需 Key）。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/weather?lat=&lon=` | `lat ∈ [-90,90]`、`lon ∈ [-180,180]`。返回今明两天预报。 |
+
+响应：`{ "data": { "current": { temp, weatherCode, text, windSpeed }, "days": [{ date, weatherCode, text, tempMax, tempMin, precipProb }] } }`。
+上游不可达 / 超时 → `{ "data": null }`（不返回 5xx，前端静默隐藏卡片）。
+同一坐标 30 分钟内进程内缓存。
+
 ---
 
 ## 14. 健康检查
@@ -776,6 +825,8 @@ Query：`format`（`csv` | `xlsx`，默认 `csv`）、`examIds`（逗号分隔�
 | Export | `GET /exports/class/{id}/scores`、`GET /exports/class/{id}/students` |
 | Upload | `POST /uploads/avatar` |
 | Push | `GET /push/vapid-public-key`、`POST|DELETE /push/subscriptions`、`POST /push/test` |
+| Devices | `GET /devices`、`DELETE /devices/subscriptions/{id}`、`DELETE /devices/sessions/{id}` |
+| Weather | `GET /weather` |
 | Health | `GET /health` |
 
 ## 附录 B：前端离线缓存策略（PWA）

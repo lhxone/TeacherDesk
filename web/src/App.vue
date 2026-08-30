@@ -50,16 +50,18 @@ onUnmounted(() => {
   min-height: 100vh;
 }
 
+/* Keep content clear of the iOS status bar / notch in standalone PWA mode.
+   viewport-fit=cover (index.html) lets the page draw under it otherwise. */
+@media (max-width: 768px) {
+  .app-shell.with-nav {
+    padding-top: env(safe-area-inset-top);
+  }
+}
+
 @media (min-width: 769px) {
   .app-shell.with-nav .app-main {
     margin-left: var(--sidebar-width);
     min-height: calc(100vh - 0px);
-  }
-}
-
-@media (max-width: 768px) {
-  .app-shell.with-nav .app-main {
-    padding-bottom: var(--nav-height);
   }
 }
 </style>

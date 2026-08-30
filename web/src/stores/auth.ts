@@ -23,7 +23,7 @@ export const useAuthStore = defineStore('auth', () => {
     await purgeApiCaches();
     useClassStore().$reset();
 
-    tokenStore.set(res.data.accessToken, res.data.refreshToken);
+    tokenStore.set(res.data.accessToken, res.data.refreshToken, res.data.sessionId);
     user.value = res.data.user;
   }
 
@@ -37,7 +37,7 @@ export const useAuthStore = defineStore('auth', () => {
     await purgeApiCaches();
     useClassStore().$reset();
 
-    tokenStore.set(res.data.accessToken, res.data.refreshToken);
+    tokenStore.set(res.data.accessToken, res.data.refreshToken, res.data.sessionId);
     user.value = res.data.user;
     void syncPushSubscription();
   }

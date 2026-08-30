@@ -415,7 +415,9 @@ upsert，既更新密钥，也把共享设备上前一位教师留下的行改�
 | `user_id` | 所属教师，`ON DELETE CASCADE` |
 | `endpoint` | 推送服务 URL，唯一 |
 | `p256dh` / `auth` | RFC 8291 加密公钥与认证密钥 |
-| `user_agent` | 便于用户辨认设备 |
+| `user_agent` | 原始 UA |
+| `label` | 由 UA 解析出的友好名（如「Chrome · Windows」），设备管理页展示 |
+| `last_seen_at` | 每次订阅 upsert 时刷新，设备管理页据此显示「最近活跃」 |
 
 ### 2.13 sent_reminders — 提醒去重台账
 

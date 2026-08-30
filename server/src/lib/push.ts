@@ -10,6 +10,8 @@ import webpush from 'web-push';
 import { prisma } from '../db.js';
 import { config, pushEnabled } from '../config.js';
 
+type Logger = { warn: (o: unknown, m?: string) => void };
+
 let configured = false;
 
 function ensureConfigured() {
@@ -32,7 +34,11 @@ export type PushPayload = {
  * service means the subscription is dead (browser uninstalled, permission
  * revoked) — those rows are deleted so they are not retried forever.
  */
-export async function sendPushToUser(userId: string, payload: PushPayload): Promise<number> {
+export async function sendPushToUser(
+  userId: string,
+  payload: PushPayload,
+  logger?: Logger,
+): Promise<number> {
   ensureConfigured();
   if (!pushEnabled()) return 0;
 
@@ -48,12 +54,24 @@ export async function sendPushToUser(userId: string, payload: PushPayload): Prom
         await webpush.sendNotification(
           { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
           body,
+          // Without a TTL some push services (FCM) drop the message immediately
+          // when the device is offline instead of holding it.
+          { TTL: 3600 },
         );
         delivered += 1;
       } catch (err) {
         const status = (err as { statusCode?: number }).statusCode;
         if (status === 404 || status === 410) {
+          // Dead subscription: browser uninstalled or permission revoked.
           await prisma.pushSubscription.delete({ where: { id: sub.id } }).catch(() => {});
+        } else {
+          // 400 (VAPID mismatch — e.g. keys rotated), 413 (payload too big), 429,
+          // 5xx. Silently swallowing these is why "push stopped working" is so
+          // hard to diagnose in production.
+          logger?.warn(
+            { statusCode: status, endpoint: sub.endpoint.slice(0, 60), userId },
+            'web push delivery failed',
+          );
         }
       }
     }),

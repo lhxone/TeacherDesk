@@ -75,6 +75,18 @@ export async function requireGroupingPlan(planId: string, userId: string) {
   return plan;
 }
 
+export async function requirePushSubscription(id: string, userId: string) {
+  const sub = await prisma.pushSubscription.findFirst({ where: { id, userId } });
+  if (!sub) throw ApiError.forbidden();
+  return sub;
+}
+
+export async function requireRefreshTokenRow(id: string, userId: string) {
+  const row = await prisma.refreshToken.findFirst({ where: { id, userId } });
+  if (!row) throw ApiError.forbidden();
+  return row;
+}
+
 /** Assert every id belongs to the given class (used by bulk seat/group writes). */
 export async function assertStudentsInClass(studentIds: string[], classId: string) {
   if (studentIds.length === 0) return;

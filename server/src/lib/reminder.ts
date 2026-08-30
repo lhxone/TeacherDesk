@@ -14,6 +14,7 @@ import { config } from '../config.js';
 import { DEFAULT_SETTINGS } from '../config.js';
 import { sendPushToUser } from './push.js';
 import { formatDate, slotOccursOn } from './schedule.js';
+import { lessonPeriodTimes } from './daySchedule.js';
 
 type Settings = typeof DEFAULT_SETTINGS;
 
@@ -24,6 +25,9 @@ function wallTimeToInstant(day: Date, hhmm: string): Date | null {
   const minutes = Number(m[1]) * 60 + Number(m[2]);
   return new Date(day.getTime() + (minutes - config.localTzOffsetMinutes) * 60_000);
 }
+
+type PushLogger = { warn: (o: unknown, m?: string) => void };
+let scanLogger: PushLogger | undefined;
 
 /** One scan pass. Exported for tests. */
 export async function runReminderScan(now: Date = new Date()): Promise<number> {
@@ -59,7 +63,7 @@ async function markSent(userId: string, kind: string, refId: string, occursAt: D
 }
 
 async function remindLessons(userId: string, settings: Settings, now: Date, windowEnd: Date) {
-  const periodTimes = settings.periodTimes ?? [];
+  const periodTimes = lessonPeriodTimes(settings.daySchedule);
   // A lesson can only start "soon" today or (just past midnight) tomorrow.
   const days = [startOfLocalDay(now), startOfLocalDay(new Date(windowEnd.getTime()))];
   const uniqueDays = [...new Map(days.map((d) => [d.getTime(), d])).values()];
@@ -89,7 +93,7 @@ async function remindLessons(userId: string, settings: Settings, now: Date, wind
         body: `${mins} 分钟后（第${slot.period}节 ${times?.[0]}）${where ? '，' + where : ''}`,
         tag: `lesson-${slot.id}-${formatDate(day)}`,
         url: '/schedule',
-      });
+      }, scanLogger);
       await markSent(userId, 'lesson', slot.id, occursAt);
       if (delivered > 0) pushed += 1;
     }
@@ -118,7 +122,7 @@ async function remindTodos(userId: string, now: Date, windowEnd: Date, lead: num
       body: `${mins <= 0 ? '现在' : mins + ' 分钟后'}开始${ev.class?.name ? '（' + ev.class.name + '）' : ''}`,
       tag: `event-${ev.id}`,
       url: '/',
-    });
+    }, scanLogger);
     await markSent(userId, 'event', ev.id, ev.startAt);
     if (delivered > 0) pushed += 1;
   }
@@ -143,8 +147,9 @@ async function pruneLedger(now: Date) {
 let timer: NodeJS.Timeout | null = null;
 
 /** Start the periodic scan. No-op if already running or the interval is disabled. */
-export function startReminderScheduler(logger?: { info: (o: unknown, m?: string) => void; error: (o: unknown, m?: string) => void }) {
+export function startReminderScheduler(logger?: { info: (o: unknown, m?: string) => void; warn: (o: unknown, m?: string) => void; error: (o: unknown, m?: string) => void }) {
   if (timer || config.reminderScanIntervalMs <= 0) return;
+  scanLogger = logger;
 
   const tick = async () => {
     try {

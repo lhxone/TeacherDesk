@@ -11,10 +11,20 @@ export type User = {
   createdAt: string;
 };
 
+export type DayScheduleItem = {
+  key: string;
+  kind: 'lesson' | 'activity';
+  label: string;
+  start: string;
+  end: string;
+  period?: number;
+};
+
 export type UserSettings = {
   periodsPerDay: number;
   showWeekend: boolean;
   periodTimes: [string, string][];
+  daySchedule: DayScheduleItem[];
   gradeThresholds: { excellent: number; good: number; pass: number };
   pushRemindersEnabled: boolean;
   remindBeforeMinutes: number;
@@ -24,6 +34,7 @@ export type AuthResult = {
   user: User;
   accessToken: string;
   refreshToken: string;
+  sessionId: string;
   expiresIn: number;
 };
 
@@ -82,6 +93,22 @@ export type ScheduleSlot = {
   note: string | null;
 };
 
+export type TimelineItem =
+  | { kind: 'activity'; label: string; start: string; end: string }
+  | {
+      kind: 'lesson';
+      label: string;
+      start: string;
+      end: string;
+      period: number | null;
+      slotId: string | null;
+      subject: string | null;
+      classId: string | null;
+      className: string | null;
+      classColor: string | null;
+      location: string | null;
+    };
+
 export type AgendaDay = {
   date: string;
   weekday: number;
@@ -97,7 +124,25 @@ export type AgendaDay = {
     classColor: string | null;
     location: string | null;
   }[];
+  timeline: TimelineItem[];
   events: EventItem[];
+};
+
+export type WeatherData = {
+  current: {
+    temp: number | null;
+    weatherCode: number | null;
+    text: string;
+    windSpeed: number | null;
+  };
+  days: {
+    date: string;
+    weatherCode: number | null;
+    text: string;
+    tempMax: number | null;
+    tempMin: number | null;
+    precipProb: number | null;
+  }[];
 };
 
 export type EventItem = {

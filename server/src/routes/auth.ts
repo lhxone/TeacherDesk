@@ -5,6 +5,8 @@ import { prisma } from '../db.js';
 import { config, DEFAULT_SETTINGS } from '../config.js';
 import { ApiError } from '../errors.js';
 import { requireUser } from '../app.js';
+import { describeUserAgent } from '../lib/device.js';
+import { normalizeDaySchedule } from '../lib/daySchedule.js';
 import {
   assertNotLocked,
   clearLoginFailures,
@@ -52,16 +54,21 @@ async function issueTokens(userId: string, email: string, rememberMe: boolean, d
   const accessToken = signAccessToken({ sub: userId, email });
   const { token, hash } = generateRefreshToken();
 
-  await prisma.refreshToken.create({
+  const row = await prisma.refreshToken.create({
     data: {
       userId,
       tokenHash: hash,
-      deviceInfo: device?.slice(0, 255),
+      deviceInfo: describeUserAgent(device).slice(0, 255),
       expiresAt: refreshTokenExpiry(rememberMe),
     },
   });
 
-  return { accessToken, refreshToken: token, expiresIn: config.accessTokenTtlSec };
+  return {
+    accessToken,
+    refreshToken: token,
+    sessionId: row.id,
+    expiresIn: config.accessTokenTtlSec,
+  };
 }
 
 export async function registerAuthRoutes(app: FastifyInstance) {
@@ -208,13 +215,19 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     const current = await prisma.user.findFirst({ where: { id: userId, deletedAt: null } });
     if (!current) throw ApiError.unauthenticated();
 
+    // Normalise (validate + sort + renumber lesson periods) before persisting.
+    const incomingSettings = body.settings ? { ...body.settings } : undefined;
+    if (incomingSettings && 'daySchedule' in incomingSettings) {
+      incomingSettings.daySchedule = normalizeDaySchedule(incomingSettings.daySchedule);
+    }
+
     const user = await prisma.user.update({
       where: { id: userId },
       data: {
         displayName: body.displayName,
         avatarUrl: body.avatarUrl,
-        settings: body.settings
-          ? ({ ...(current.settings as object), ...body.settings } as Prisma.InputJsonValue)
+        settings: incomingSettings
+          ? ({ ...(current.settings as object), ...incomingSettings } as Prisma.InputJsonValue)
           : undefined,
       },
     });

@@ -17,6 +17,8 @@ import { registerScoreRoutes } from './routes/scores.js';
 import { registerAnalyticsRoutes } from './routes/analytics.js';
 import { registerExportRoutes } from './routes/exports.js';
 import { registerPushRoutes } from './routes/push.js';
+import { registerDeviceRoutes } from './routes/devices.js';
+import { registerWeatherRoutes } from './routes/weather.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -130,6 +132,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(registerAnalyticsRoutes, { prefix });
   await app.register(registerExportRoutes, { prefix });
   await app.register(registerPushRoutes, { prefix });
+  await app.register(registerDeviceRoutes, { prefix });
+  await app.register(registerWeatherRoutes, { prefix });
 
   return app;
 }

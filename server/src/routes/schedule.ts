@@ -12,6 +12,12 @@ import {
   slotOccursOn,
   weekParity,
 } from '../lib/schedule.js';
+import {
+  DEFAULT_DAY_SCHEDULE,
+  lessonPeriodTimes,
+  toMinutes,
+  type DayScheduleItem,
+} from '../lib/daySchedule.js';
 
 const slotSchema = z.object({
   classId: z.string().uuid().nullable().optional(),
@@ -228,7 +234,10 @@ export async function registerScheduleRoutes(app: FastifyInstance) {
     ]);
 
     const settings = { ...DEFAULT_SETTINGS, ...(user.settings as object) } as typeof DEFAULT_SETTINGS;
-    const periodTimes = settings.periodTimes ?? [];
+    const daySchedule: DayScheduleItem[] = settings.daySchedule?.length
+      ? settings.daySchedule
+      : DEFAULT_DAY_SCHEDULE;
+    const periodTimes = lessonPeriodTimes(daySchedule);
 
     const data = days.map((day) => {
       const dayStr = formatDate(day);
@@ -237,25 +246,59 @@ export async function registerScheduleRoutes(app: FastifyInstance) {
         .sort((a, b) => a.period - b.period);
 
       const termStart = daySlots.find((s) => s.startDate)?.startDate ?? null;
+      const slotByPeriod = new Map(daySlots.map((s) => [s.period, s]));
+
+      const lessons = daySlots.map((s) => {
+        const times = periodTimes[s.period - 1];
+        return {
+          slotId: s.id,
+          period: s.period,
+          startTime: times?.[0] ?? null,
+          endTime: times?.[1] ?? null,
+          subject: s.subject,
+          classId: s.classId,
+          className: s.class?.name ?? null,
+          classColor: s.class?.color ?? null,
+          location: s.location,
+        };
+      });
+
+      // One row per day-schedule block, in time order. Lesson blocks are merged
+      // with that period's slot (if any) so the client renders both fixed
+      // activities (早读 / 眼操 / 午餐 …) and scheduled lessons from one list.
+      const timeline = [...daySchedule]
+        .sort((a, b) => toMinutes(a.start) - toMinutes(b.start))
+        .map((block) => {
+          if (block.kind === 'activity') {
+            return {
+              kind: 'activity' as const,
+              label: block.label,
+              start: block.start,
+              end: block.end,
+            };
+          }
+          const s = block.period ? slotByPeriod.get(block.period) : undefined;
+          return {
+            kind: 'lesson' as const,
+            label: block.label,
+            start: block.start,
+            end: block.end,
+            period: block.period ?? null,
+            slotId: s?.id ?? null,
+            subject: s?.subject ?? null,
+            classId: s?.classId ?? null,
+            className: s?.class?.name ?? null,
+            classColor: s?.class?.color ?? null,
+            location: s?.location ?? null,
+          };
+        });
 
       return {
         date: dayStr,
         weekday: isoWeekday(day),
         weekParity: weekParity(day, termStart),
-        lessons: daySlots.map((s) => {
-          const times = periodTimes[s.period - 1];
-          return {
-            slotId: s.id,
-            period: s.period,
-            startTime: times?.[0] ?? null,
-            endTime: times?.[1] ?? null,
-            subject: s.subject,
-            classId: s.classId,
-            className: s.class?.name ?? null,
-            classColor: s.class?.color ?? null,
-            location: s.location,
-          };
-        }),
+        lessons,
+        timeline,
         events: events
           .filter((e) => formatDate(e.startAt) === dayStr)
           .map((e) => ({
