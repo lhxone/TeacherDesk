@@ -16,6 +16,7 @@ import { registerExamRoutes } from './routes/exams.js';
 import { registerScoreRoutes } from './routes/scores.js';
 import { registerAnalyticsRoutes } from './routes/analytics.js';
 import { registerExportRoutes } from './routes/exports.js';
+import { registerPushRoutes } from './routes/push.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -128,6 +129,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(registerScoreRoutes, { prefix });
   await app.register(registerAnalyticsRoutes, { prefix });
   await app.register(registerExportRoutes, { prefix });
+  await app.register(registerPushRoutes, { prefix });
 
   return app;
 }

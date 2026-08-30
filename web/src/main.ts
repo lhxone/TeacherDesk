@@ -1,9 +1,20 @@
 import { createApp } from 'vue';
 import { createPinia } from 'pinia';
+import { registerSW } from 'virtual:pwa-register';
 import App from './App.vue';
 import { router } from './router';
 import { purgeApiCaches, setAuthFailureHandler } from './api/client';
+import { syncPushSubscription } from './api/push';
 import './styles.css';
+
+// Keep the service worker current (autoUpdate). Once it is active, refresh the
+// push subscription so reminders keep reaching this device.
+registerSW({
+  immediate: true,
+  onRegisteredSW() {
+    void syncPushSubscription();
+  },
+});
 
 const app = createApp(App);
 app.use(createPinia());

@@ -191,7 +191,17 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       .object({
         displayName: z.string().min(1).max(64).optional(),
         avatarUrl: z.string().url().max(512).nullable().optional(),
-        settings: z.record(z.unknown()).optional(),
+        settings: z
+          .record(z.unknown())
+          .refine(
+            (s) =>
+              s.remindBeforeMinutes === undefined ||
+              (typeof s.remindBeforeMinutes === 'number' &&
+                s.remindBeforeMinutes >= 1 &&
+                s.remindBeforeMinutes <= 120),
+            { message: 'remindBeforeMinutes 需在 1–120 之间' },
+          )
+          .optional(),
       })
       .parse(req.body);
 

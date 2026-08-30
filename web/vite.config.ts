@@ -7,8 +7,16 @@ export default defineConfig({
   plugins: [
     vue(),
     VitePWA({
+      // injectManifest so our own service worker (src/sw.ts) can handle `push`
+      // and `notificationclick` on top of the Workbox precache/runtime caching.
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg'],
+      injectManifest: {
+        globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+      },
       manifest: {
         name: '教师工作台',
         short_name: 'TeacherDesk',
@@ -29,41 +37,9 @@ export default defineConfig({
           },
         ],
       },
-      workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
-        runtimeCaching: [
-          {
-            // Auth endpoints must never be cached — a cached /auth/me would
-            // hand the next visitor the previous teacher's identity.
-            urlPattern: /\/api\/v1\/auth\//,
-            handler: 'NetworkOnly',
-          },
-          {
-            // Offline reads for PRD §3.8 / AC-16. These responses contain
-            // student names, phone numbers and scores, so:
-            //  - NetworkFirst, never StaleWhileRevalidate: a logged-in teacher
-            //    must not be shown another account's data from cache while the
-            //    network is available.
-            //  - Short TTL, and purged on login/logout/auth-failure by
-            //    purgeApiCaches().
-            // The cache name must keep the `td-` prefix for that purge to find it.
-            urlPattern: /\/api\/v1\/(classes|students|tags|schedule|events|seating-charts)/,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'td-data',
-              networkTimeoutSeconds: 4,
-              expiration: { maxEntries: 80, maxAgeSeconds: 60 * 60 * 12 },
-              cacheableResponse: { statuses: [200] },
-            },
-          },
-          {
-            // Analytics is derived data that is cheap to refetch and of little
-            // use offline, so it is not worth persisting to disk at all.
-            urlPattern: /\/api\/v1\/analytics\//,
-            handler: 'NetworkOnly',
-          },
-        ],
-      },
+      // Runtime caching (previously the `workbox.runtimeCaching` block) now lives
+      // in src/sw.ts, since injectManifest ships our own service worker.
+      devOptions: { enabled: false, type: 'module' },
     }),
   ],
   resolve: {
