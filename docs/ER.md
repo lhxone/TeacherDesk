@@ -404,6 +404,28 @@ erDiagram
 
 ---
 
+### 2.12 push_subscriptions — Web Push 订阅端点
+
+每个开启推送的浏览器 / PWA 一行。`endpoint` 唯一：同一浏览器重新订阅时按 `endpoint`
+upsert，既更新密钥，也把共享设备上前一位教师留下的行改归当前用户。推送服务返回
+`404/410`（浏览器卸载、权限撤销）时该行会被删除。
+
+| 字段 | 说明 |
+|---|---|
+| `user_id` | 所属教师，`ON DELETE CASCADE` |
+| `endpoint` | 推送服务 URL，唯一 |
+| `p256dh` / `auth` | RFC 8291 加密公钥与认证密钥 |
+| `user_agent` | 便于用户辨认设备 |
+
+### 2.13 sent_reminders — 提醒去重台账
+
+课程按周重复、没有「每次上课」的行，因此调度器每推送一条提醒就在此记一行
+`(user_id, kind, ref_id, occurs_at)`（`kind` 为 `lesson` / `event`），下次扫描命中即跳过。
+唯一约束 `(user_id, kind, ref_id, occurs_at)` 兼作并发扫描的幂等保护；`occurs_at`
+早于 24 小时前的行会被定期清理。
+
+---
+
 ## 3. 数据隔离规则
 
 所有业务数据必须能追溯到 `user_id`：
@@ -422,6 +444,8 @@ users
  ├─ schedule_slots.user_id
  ├─ events.user_id
  ├─ tags.user_id
+ ├─ push_subscriptions.user_id
+ ├─ sent_reminders.user_id
  └─ refresh_tokens.user_id
 ```
 

@@ -72,6 +72,11 @@ services:
       # Same-origin deployment: nginx proxies /api, so the browser never makes
       # a cross-origin request. Kept explicit as defence in depth.
       CORS_ORIGINS: ${PUBLIC_ORIGIN:-https://t-desk.buildlink.cc}
+      # Web Push. Leave the VAPID keys empty to disable push reminders.
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@teacherdesk.app}
+      LOCAL_TZ_OFFSET_MINUTES: ${LOCAL_TZ_OFFSET_MINUTES:-480}
     networks:
       - internal
     depends_on:

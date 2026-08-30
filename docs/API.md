@@ -732,6 +732,26 @@ Query：`format`（`csv` | `xlsx`，默认 `csv`）、`examIds`（逗号分隔�
 
 ---
 
+## 13.1 推送提醒 Push
+
+课程 / 待办开始前的 Web Push 提醒。后端在进程内每分钟扫描一次即将开始的课程与
+未完成的定时待办，命中 `[now, now + 提前分钟数]` 窗口即向该用户所有已订阅设备推送一
+条通知；去重记录写入 `sent_reminders`，进程重启或扫描重叠都不会重复。
+
+提前分钟数与总开关存在 `PATCH /auth/me` 的 `settings` 中：
+`{ "pushRemindersEnabled": true, "remindBeforeMinutes": 5 }`（`remindBeforeMinutes` 取值 1–120）。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/push/vapid-public-key` | `{ "data": { "key": "<VAPID 公钥或 null>", "enabled": <服务端是否配置了 VAPID> } }` |
+| POST | `/push/subscriptions` | `{ "endpoint", "keys": { "p256dh", "auth" } }`，按 `endpoint` upsert，幂等 → `201` |
+| DELETE | `/push/subscriptions` | Body `{ "endpoint" }`，注销该设备订阅 → `204` |
+| POST | `/push/test` | 向当前用户所有设备发送一条测试通知，返回 `{ "data": { "delivered": <条数> } }` |
+
+未配置 VAPID 时，`enabled` 为 `false`，其余接口仍可调用但不会实际下发通知。
+
+---
+
 ## 14. 健康检查
 
 ### GET /health → `200 { "status": "ok", "version": "1.0.0", "time": "…" }`（无需鉴权）
@@ -755,6 +775,7 @@ Query：`format`（`csv` | `xlsx`，默认 `csv`）、`examIds`（逗号分隔�
 | Analytics | `GET /analytics/class/{id}/exam/{examId}`、`GET /analytics/class/{id}/trend`、`GET /analytics/class/compare`、`GET /analytics/student/{id}` |
 | Export | `GET /exports/class/{id}/scores`、`GET /exports/class/{id}/students` |
 | Upload | `POST /uploads/avatar` |
+| Push | `GET /push/vapid-public-key`、`POST|DELETE /push/subscriptions`、`POST /push/test` |
 | Health | `GET /health` |
 
 ## 附录 B：前端离线缓存策略（PWA）
@@ -780,3 +801,7 @@ Service Worker 的运行时缓存**只按 URL 存储，不区分账号**。学�
 - Refresh Token 失效、被动登出时
 
 所有运行时缓存以 `td-` 前缀命名，清理逻辑据此匹配；新增缓存请沿用该前缀。
+
+> 实现说明：为支持 Web Push，Service Worker 改为 `injectManifest` 策略，源码在
+> `web/src/sw.ts`。上表的运行时缓存规则从 `vite.config.ts` 平移到该文件，**策略与
+> 隐私约束完全不变**；`sw.ts` 额外处理 `push` 与 `notificationclick` 事件。

@@ -270,3 +270,40 @@ describe('isolation: exports', () => {
     expect(res.statusCode).toBe(403);
   });
 });
+
+describe('isolation: push subscriptions', () => {
+  it('one teacher cannot delete another teacher\'s device subscription', async () => {
+    const endpoint = 'https://push.example.com/alice-device';
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/push/subscriptions',
+      headers: alice.auth,
+      payload: { endpoint, keys: { p256dh: 'p'.repeat(20), auth: 'a'.repeat(20) } },
+    });
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/api/v1/push/subscriptions',
+      headers: bob.auth,
+      payload: { endpoint },
+    });
+
+    // Idempotent delete returns 204 either way, but Alice's row must survive.
+    expect(res.statusCode).toBe(204);
+    expect(await prisma.pushSubscription.count({ where: { userId: alice.id } })).toBe(1);
+  });
+
+  it('re-subscribing the same endpoint as another user reassigns it, not duplicates it', async () => {
+    const endpoint = 'https://push.example.com/shared-browser';
+    const keys = { p256dh: 'p'.repeat(20), auth: 'a'.repeat(20) };
+
+    await app.inject({ method: 'POST', url: '/api/v1/push/subscriptions',
+      headers: alice.auth, payload: { endpoint, keys } });
+    await app.inject({ method: 'POST', url: '/api/v1/push/subscriptions',
+      headers: bob.auth, payload: { endpoint, keys } });
+
+    expect(await prisma.pushSubscription.count()).toBe(1);
+    const row = await prisma.pushSubscription.findFirstOrThrow();
+    expect(row.userId).toBe(bob.id);
+  });
+});

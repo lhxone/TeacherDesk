@@ -16,6 +16,8 @@ export type UserSettings = {
   showWeekend: boolean;
   periodTimes: [string, string][];
   gradeThresholds: { excellent: number; good: number; pass: number };
+  pushRemindersEnabled: boolean;
+  remindBeforeMinutes: number;
 };
 
 export type AuthResult = {

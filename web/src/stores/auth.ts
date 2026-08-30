@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { api, purgeApiCaches, tokenStore } from '@/api/client';
+import { disablePush, syncPushSubscription } from '@/api/push';
 import { useClassStore } from '@/stores/classes';
 import type { AuthResult, Envelope, User } from '@/api/types';
 
@@ -38,6 +39,7 @@ export const useAuthStore = defineStore('auth', () => {
 
     tokenStore.set(res.data.accessToken, res.data.refreshToken);
     user.value = res.data.user;
+    void syncPushSubscription();
   }
 
   async function logout() {
@@ -59,6 +61,10 @@ export const useAuthStore = defineStore('auth', () => {
    * explicit logout.
    */
   async function clearLocalIdentity() {
+    // Drop this device's push subscription first (while the token still works),
+    // so a shared browser does not keep delivering the previous teacher's
+    // reminders after they sign out.
+    await disablePush().catch(() => {});
     tokenStore.clear();
     user.value = null;
     useClassStore().$reset();
@@ -72,6 +78,7 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const res = await api.get<Envelope<User>>('/auth/me');
       user.value = res.data;
+      void syncPushSubscription();
       return true;
     } catch {
       await clearLocalIdentity();

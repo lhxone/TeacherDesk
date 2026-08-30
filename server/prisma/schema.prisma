@@ -23,13 +23,51 @@ model User {
   updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt    DateTime? @map("deleted_at") @db.Timestamptz(6)
 
-  refreshTokens RefreshToken[]
-  classes       Class[]
-  scheduleSlots ScheduleSlot[]
-  events        Event[]
-  tags          Tag[]
+  refreshTokens     RefreshToken[]
+  classes           Class[]
+  scheduleSlots     ScheduleSlot[]
+  events            Event[]
+  tags              Tag[]
+  pushSubscriptions PushSubscription[]
+  sentReminders     SentReminder[]
 
   @@map("users")
+}
+
+// A browser/PWA Web Push endpoint (RFC 8030). One row per device+browser that
+// opted in. `endpoint` is unique so re-subscribing the same browser updates the
+// keys in place instead of piling up dead rows.
+model PushSubscription {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  endpoint  String    @unique
+  p256dh    String   @db.VarChar(255)
+  auth      String   @db.VarChar(255)
+  userAgent String?  @map("user_agent") @db.VarChar(255)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("push_subscriptions")
+}
+
+// Idempotency ledger for reminders. Lessons recur without a row per occurrence,
+// so the scheduler records (userId, kind, refId, occursAt) after pushing and
+// skips anything already here. Pruned once the occurrence is well in the past.
+model SentReminder {
+  id       String   @id @default(uuid()) @db.Uuid
+  userId   String   @map("user_id") @db.Uuid
+  kind     String   @db.VarChar(16)
+  refId    String   @map("ref_id") @db.VarChar(64)
+  occursAt DateTime @map("occurs_at") @db.Timestamptz(6)
+  sentAt   DateTime @default(now()) @map("sent_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, kind, refId, occursAt])
+  @@index([occursAt])
+  @@map("sent_reminders")
 }
 
 model RefreshToken {

@@ -13,6 +13,7 @@ Web 优先，同时以 PWA 形式提供可安装的手机端体验。
 | 班级 | 增删改查、归档、按学年筛选 |
 | 学生 | 增删改查、批量导入（含冲突预览）、标签、批量操作 |
 | 日程 | 周课表（支持单双周）、日视图、待办事项（增删改查、勾选完成、关联班级） |
+| 提醒 | 课程 / 待办开始前的 Web Push 推送（浏览器与已安装 PWA，关闭页面也能收到），提前分钟数可配置 |
 | 座位图 | 拖拽排座、随机排座（可固定座位/前排优先）、多方案、打印 |
 | 课堂工具 | 随机抽签（不重复/按权重）、随机分组（按成绩或性别均衡） |
 | 成绩 | 考试管理、快捷录入、缺考标记、CSV 导出 |
@@ -22,7 +23,7 @@ Web 优先，同时以 PWA 形式提供可安装的手机端体验。
 
 ## 技术栈
 
-**后端** Node.js 20 · Fastify · Prisma · PostgreSQL 15 · Zod · JWT
+**后端** Node.js 20 · Fastify · Prisma · PostgreSQL 15 · Zod · JWT · web-push (VAPID)
 **前端** Vue 3 · Vite · Pinia · Vue Router · ECharts · vite-plugin-pwa
 **部署** Docker Compose · nginx · Cloudflare Tunnel
 
