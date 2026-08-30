@@ -610,8 +610,9 @@ describe('schedule and events', () => {
     });
 
     const lesson = res.json().data[0].lessons[0];
-    expect(lesson.startTime).toBe('08:55');
-    expect(lesson.endTime).toBe('09:40');
+    // Default daySchedule: period 2 is 09:00–09:45.
+    expect(lesson.startTime).toBe('09:00');
+    expect(lesson.endTime).toBe('09:45');
     expect(lesson.className).toBe('高二(3)班');
   });
 

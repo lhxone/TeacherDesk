@@ -130,6 +130,34 @@ describe('reminder scan: lessons', () => {
     expect(sent[0].payload).toMatchObject({ title: '数学 即将开始' });
   });
 
+  it('uses the user\'s custom daySchedule for the lesson start time', async () => {
+    await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/auth/me',
+      headers: user.auth,
+      payload: {
+        settings: {
+          pushRemindersEnabled: true,
+          remindBeforeMinutes: 5,
+          daySchedule: [
+            { key: 'p1', kind: 'lesson', label: '第1节', start: '07:40', end: '08:20' },
+          ],
+        },
+      },
+    });
+    const classId = await createClass(app, user);
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/schedule/slots',
+      headers: user.auth,
+      payload: { classId, subject: '语文', weekday: 1, period: 1, repeatRule: 'weekly' },
+    });
+
+    // 07:40 local (UTC+8) == 23:40 UTC on the 13th. 07:36 local == 23:36 UTC.
+    expect(await runReminderScan(new Date('2026-09-13T23:36:00.000Z'))).toBe(1);
+    expect(sent[0].payload).toMatchObject({ title: '语文 即将开始' });
+  });
+
   it('does not push for a lesson on a different weekday', async () => {
     await enableReminders(5);
     const classId = await createClass(app, user);

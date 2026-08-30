@@ -16,6 +16,7 @@ const routes = [
   { path: '/analytics/class/:classId', name: 'class-analytics', component: () => import('@/views/ClassAnalyticsView.vue'), props: true },
   { path: '/analytics/student/:studentId', name: 'student-analytics', component: () => import('@/views/StudentAnalyticsView.vue'), props: true },
   { path: '/settings', name: 'settings', component: () => import('@/views/SettingsView.vue') },
+  { path: '/devices', name: 'devices', component: () => import('@/views/DevicesView.vue') },
   { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('@/views/NotFoundView.vue') },
 ];
 

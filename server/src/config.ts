@@ -1,3 +1,5 @@
+import { DEFAULT_DAY_SCHEDULE } from './lib/daySchedule.js';
+
 export const config = {
   port: Number(process.env.PORT ?? 3000),
   host: process.env.HOST ?? '0.0.0.0',
@@ -27,19 +29,18 @@ export const config = {
 
 export const pushEnabled = () => Boolean(config.vapidPublicKey && config.vapidPrivateKey);
 
+// `periodTimes` is kept for backwards compatibility; it is derived from
+// DEFAULT_DAY_SCHEDULE's lesson blocks. New code should read `daySchedule` and
+// go through `lessonPeriodTimes()` in lib/daySchedule.ts.
+const DEFAULT_PERIOD_TIMES = DEFAULT_DAY_SCHEDULE.filter((i) => i.kind === 'lesson').map(
+  (i) => [i.start, i.end] as [string, string],
+);
+
 export const DEFAULT_SETTINGS = {
   periodsPerDay: 8,
   showWeekend: false,
-  periodTimes: [
-    ['08:00', '08:45'],
-    ['08:55', '09:40'],
-    ['10:00', '10:45'],
-    ['10:55', '11:40'],
-    ['14:00', '14:45'],
-    ['14:55', '15:40'],
-    ['16:00', '16:45'],
-    ['16:55', '17:40'],
-  ],
+  periodTimes: DEFAULT_PERIOD_TIMES,
+  daySchedule: DEFAULT_DAY_SCHEDULE,
   gradeThresholds: { excellent: 0.85, good: 0.75, pass: 0.6 },
   // Push reminders: master switch plus how many minutes before a lesson/todo
   // start the notification fires.

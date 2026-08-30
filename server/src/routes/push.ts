@@ -4,6 +4,7 @@ import { prisma } from '../db.js';
 import { requireUser } from '../app.js';
 import { config, pushEnabled } from '../config.js';
 import { sendPushToUser } from '../lib/push.js';
+import { describeUserAgent } from '../lib/device.js';
 
 const subscriptionSchema = z.object({
   endpoint: z.string().url().max(1024),
@@ -24,6 +25,9 @@ export async function registerPushRoutes(app: FastifyInstance) {
     const userId = requireUser(req);
     const body = subscriptionSchema.parse(req.body);
 
+    const ua = (req.headers['user-agent'] ?? '').slice(0, 255) || null;
+    const label = describeUserAgent(ua);
+
     await prisma.pushSubscription.upsert({
       where: { endpoint: body.endpoint },
       create: {
@@ -31,7 +35,9 @@ export async function registerPushRoutes(app: FastifyInstance) {
         endpoint: body.endpoint,
         p256dh: body.keys.p256dh,
         auth: body.keys.auth,
-        userAgent: (req.headers['user-agent'] ?? '').slice(0, 255) || null,
+        userAgent: ua,
+        label,
+        lastSeenAt: new Date(),
       },
       // Re-subscribing on the same browser rotates the keys and, if the row was
       // left behind by a previous teacher on a shared device, reassigns it.
@@ -39,7 +45,9 @@ export async function registerPushRoutes(app: FastifyInstance) {
         userId,
         p256dh: body.keys.p256dh,
         auth: body.keys.auth,
-        userAgent: (req.headers['user-agent'] ?? '').slice(0, 255) || null,
+        userAgent: ua,
+        label,
+        lastSeenAt: new Date(),
       },
     });
 
@@ -57,12 +65,16 @@ export async function registerPushRoutes(app: FastifyInstance) {
   /** Fire a test notification to the caller's devices, so the user can confirm it works. */
   app.post('/push/test', async (req) => {
     const userId = requireUser(req);
-    const delivered = await sendPushToUser(userId, {
-      title: '推送测试',
-      body: '如果你看到这条通知，说明推送提醒已配置成功。',
-      tag: 'test',
-      url: '/schedule',
-    });
+    const delivered = await sendPushToUser(
+      userId,
+      {
+        title: '推送测试',
+        body: '如果你看到这条通知，说明推送提醒已配置成功。',
+        tag: 'test',
+        url: '/schedule',
+      },
+      req.log,
+    );
     return { data: { delivered } };
   });
 }

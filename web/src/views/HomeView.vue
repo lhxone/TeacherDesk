@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useClassStore } from '@/stores/classes';
 import EventDialog from '@/components/EventDialog.vue';
 import EmptyState from '@/components/EmptyState.vue';
+import WeatherCard from '@/components/WeatherCard.vue';
 import type { AgendaDay, Envelope, EventItem } from '@/api/types';
 
 const auth = useAuthStore();
@@ -42,6 +43,13 @@ const greeting = computed(() => {
 
 const pendingEvents = computed(() => agenda.value?.events.filter((e) => !e.isDone) ?? []);
 
+// Home timeline: activities plus only the lessons that actually have a class
+// scheduled — empty periods ("空堂") are noise on the dashboard. The full
+// timeline (every period) lives on the schedule day view.
+const homeTimeline = computed(
+  () => agenda.value?.timeline.filter((it) => it.kind === 'activity' || it.slotId) ?? [],
+);
+
 async function toggleEvent(id: string, isDone: boolean) {
   await api.patch(`/events/${id}`, { isDone });
   const ev = agenda.value?.events.find((e) => e.id === id);
@@ -66,31 +74,47 @@ onMounted(async () => {
     <header class="page-header">
       <div>
         <h1>{{ greeting }}，{{ auth.user?.displayName }}</h1>
-        <p class="hint">{{ today }} · 今日课程与待办</p>
+        <p class="hint">{{ today }} · 今日日程与待办</p>
       </div>
     </header>
+
+    <WeatherCard />
 
     <div v-if="loading" class="empty">加载中…</div>
 
     <div v-else class="stack">
       <section class="card">
-        <div class="card-title">今日课程</div>
-        <EmptyState v-if="!agenda?.lessons.length" icon="calendar" title="今天没有排课">
+        <div class="card-title">今日日程</div>
+        <EmptyState v-if="!homeTimeline.length" icon="calendar" title="今天没有课程安排">
           享受一个空闲的教学日
         </EmptyState>
         <ul v-else class="lesson-list">
-          <li v-for="l in agenda.lessons" :key="l.slotId" class="lesson">
-            <span class="bar" :style="{ background: l.classColor ?? 'var(--brand)' }" />
+          <li
+            v-for="(item, i) in homeTimeline"
+            :key="i"
+            class="lesson"
+            :class="{ activity: item.kind === 'activity' }"
+          >
+            <span
+              class="bar"
+              :style="{
+                background:
+                  item.kind === 'lesson' ? (item.classColor ?? 'var(--brand)') : 'var(--border-strong)',
+              }"
+            />
             <div class="lesson-period">
-              <strong>第{{ l.period }}节</strong>
-              <span v-if="l.startTime" class="hint">{{ l.startTime }}–{{ l.endTime }}</span>
+              <strong>{{ item.label }}</strong>
+              <span class="hint">{{ item.start }}–{{ item.end }}</span>
             </div>
             <div class="lesson-main">
-              <div class="lesson-title">{{ l.subject ?? '课程' }}</div>
-              <div class="hint">
-                {{ l.className ?? '未关联班级' }}
-                <template v-if="l.location"> · {{ l.location }}</template>
-              </div>
+              <template v-if="item.kind === 'lesson'">
+                <div class="lesson-title">{{ item.subject ?? (item.slotId ? '课程' : '空堂') }}</div>
+                <div v-if="item.slotId" class="hint">
+                  {{ item.className ?? '未关联班级' }}
+                  <template v-if="item.location"> · {{ item.location }}</template>
+                </div>
+              </template>
+              <div v-else class="hint">课间活动</div>
             </div>
           </li>
         </ul>
@@ -175,8 +199,9 @@ onMounted(async () => {
 }
 
 .bar { width: 4px; align-self: stretch; border-radius: 2px; }
-.lesson-period { display: flex; flex-direction: column; min-width: 84px; }
+.lesson-period { display: flex; flex-direction: column; min-width: 96px; }
 .lesson-title { font-weight: 500; }
+.lesson.activity { background: var(--bg); }
 
 .todo {
   display: flex;

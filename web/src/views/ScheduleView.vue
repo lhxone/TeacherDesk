@@ -38,11 +38,13 @@ const showWeekend = computed(() => auth.user?.settings.showWeekend ?? false);
 const visibleDays = computed(() => (showWeekend.value ? [1, 2, 3, 4, 5, 6, 7] : [1, 2, 3, 4, 5]));
 const periods = computed(() => Array.from({ length: periodsPerDay.value }, (_, i) => i + 1));
 
+// The week grid rows follow the user's day schedule (作息时间表): lesson rows
+// carry a period column, activity rows span the whole week.
+const daySchedule = computed(() => auth.user?.settings.daySchedule ?? []);
+
 /** weekly always shows; odd/even both render in the grid, labelled. */
 const slotAt = (weekday: number, period: number) =>
   slots.value.filter((s) => s.weekday === weekday && s.period === period);
-
-const periodTime = (period: number) => auth.user?.settings.periodTimes?.[period - 1] ?? null;
 
 async function loadSlots() {
   const res = await api.get<Envelope<ScheduleSlot[]>>('/schedule/slots');
@@ -160,28 +162,44 @@ onMounted(async () => {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="p in periods" :key="p">
-            <td class="period-cell">
-              <strong>第{{ p }}节</strong>
-              <div v-if="periodTime(p)" class="hint">{{ periodTime(p)![0] }}</div>
-            </td>
-            <td v-for="d in visibleDays" :key="d" class="slot-cell" @click="!slotAt(d, p).length && openCreate(d, p)">
-              <div
-                v-for="s in slotAt(d, p)"
-                :key="s.id"
-                class="slot"
-                :style="{ borderLeftColor: s.classColor ?? 'var(--brand)' }"
+          <template v-for="(row, ri) in daySchedule" :key="ri">
+            <!-- Activity: one banner row across every weekday column -->
+            <tr v-if="row.kind === 'activity'" class="activity-row">
+              <td class="period-cell">
+                <strong>{{ row.label }}</strong>
+                <div class="hint">{{ row.start }}–{{ row.end }}</div>
+              </td>
+              <td :colspan="visibleDays.length" class="activity-cell">{{ row.label }}</td>
+            </tr>
+            <!-- Lesson: period cell + a slot cell per weekday -->
+            <tr v-else>
+              <td class="period-cell">
+                <strong>{{ row.label }}</strong>
+                <div class="hint">{{ row.start }}–{{ row.end }}</div>
+              </td>
+              <td
+                v-for="d in visibleDays"
+                :key="d"
+                class="slot-cell"
+                @click="row.period != null && !slotAt(d, row.period).length && openCreate(d, row.period)"
               >
-                <div class="slot-subject">
-                  {{ s.subject ?? '课程' }}
-                  <span v-if="ruleLabel(s.repeatRule)" class="badge">{{ ruleLabel(s.repeatRule) }}</span>
+                <div
+                  v-for="s in row.period != null ? slotAt(d, row.period) : []"
+                  :key="s.id"
+                  class="slot"
+                  :style="{ borderLeftColor: s.classColor ?? 'var(--brand)' }"
+                >
+                  <div class="slot-subject">
+                    {{ s.subject ?? '课程' }}
+                    <span v-if="ruleLabel(s.repeatRule)" class="badge">{{ ruleLabel(s.repeatRule) }}</span>
+                  </div>
+                  <div class="hint">{{ s.className ?? '—' }}</div>
+                  <div v-if="s.location" class="hint">{{ s.location }}</div>
+                  <button class="del" @click.stop="removeSlot(s.id)">×</button>
                 </div>
-                <div class="hint">{{ s.className ?? '—' }}</div>
-                <div v-if="s.location" class="hint">{{ s.location }}</div>
-                <button class="del" @click.stop="removeSlot(s.id)">×</button>
-              </div>
-            </td>
-          </tr>
+              </td>
+            </tr>
+          </template>
         </tbody>
       </table>
     </div>
@@ -201,18 +219,32 @@ onMounted(async () => {
         </p>
 
         <section class="card">
-          <div class="card-title">课程（{{ agenda.lessons.length }}）</div>
-          <p v-if="!agenda.lessons.length" class="empty-inline">这一天没有排课</p>
-          <div v-for="l in agenda.lessons" :key="l.slotId" class="lesson">
-            <span class="bar" :style="{ background: l.classColor ?? 'var(--brand)' }" />
-            <div style="min-width: 90px">
-              <strong>第{{ l.period }}节</strong>
-              <div v-if="l.startTime" class="hint">{{ l.startTime }}–{{ l.endTime }}</div>
+          <div class="card-title">今日作息</div>
+          <p v-if="!agenda.timeline.length" class="empty-inline">这一天没有作息安排</p>
+          <div
+            v-for="(item, i) in agenda.timeline"
+            :key="i"
+            class="lesson"
+            :class="{ 'lesson-activity': item.kind === 'activity' }"
+          >
+            <span
+              class="bar"
+              :style="{
+                background:
+                  item.kind === 'lesson' ? (item.classColor ?? 'var(--brand)') : 'var(--border-strong)',
+              }"
+            />
+            <div style="min-width: 108px">
+              <strong>{{ item.label }}</strong>
+              <div class="hint">{{ item.start }}–{{ item.end }}</div>
             </div>
-            <div>
-              <div>{{ l.subject ?? '课程' }}</div>
-              <div class="hint">{{ l.className ?? '—' }}<template v-if="l.location"> · {{ l.location }}</template></div>
+            <div v-if="item.kind === 'lesson'">
+              <div>{{ item.subject ?? (item.slotId ? '课程' : '空堂') }}</div>
+              <div v-if="item.slotId" class="hint">
+                {{ item.className ?? '—' }}<template v-if="item.location"> · {{ item.location }}</template>
+              </div>
             </div>
+            <div v-else class="hint">课间活动</div>
           </div>
         </section>
 
@@ -318,6 +350,13 @@ onMounted(async () => {
 table.week td { vertical-align: top; padding: 4px; }
 .period-cell { text-align: center; background: #f8fafc; white-space: nowrap; }
 .slot-cell { min-width: 120px; height: 66px; cursor: pointer; }
+.activity-row .period-cell { background: #f1f5f9; }
+.activity-cell {
+  background: #f1f5f9;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+}
 
 .slot {
   position: relative;
@@ -347,6 +386,7 @@ table.week td { vertical-align: top; padding: 4px; }
 .day-nav { display: flex; align-items: center; gap: 10px; justify-content: center; }
 
 .lesson { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
+.lesson-activity { opacity: 0.75; }
 .bar { width: 4px; height: 34px; border-radius: 2px; }
 .todo { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
 .todo-title { cursor: pointer; }

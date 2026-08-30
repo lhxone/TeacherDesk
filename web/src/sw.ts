@@ -24,6 +24,13 @@ self.skipWaiting();
 cleanupOutdatedCaches();
 precacheAndRoute(self.__WB_MANIFEST);
 
+// Take control of already-open pages as soon as this SW activates. Without it a
+// first-load tab stays uncontrolled until the next navigation, and
+// `notificationclick`'s client.navigate() is a no-op on uncontrolled clients.
+self.addEventListener('activate', (event: ExtendableEvent) => {
+  event.waitUntil(self.clients.claim());
+});
+
 // --- runtime caching (privacy rules preserved from the old config) ---
 
 // Auth endpoints must never be cached — a cached /auth/me would hand the next

@@ -275,7 +275,9 @@ tbody tr:hover { background: #f8fafc; }
 /* ---------- responsive ---------- */
 
 @media (max-width: 768px) {
-  .page { padding: 14px 14px calc(var(--nav-height) + 20px); }
+  .page {
+    padding: 14px 14px calc(var(--nav-height) + env(safe-area-inset-bottom) + 20px);
+  }
   h1 { font-size: 19px; }
   .grid { grid-template-columns: 1fr; }
   .hide-mobile { display: none !important; }

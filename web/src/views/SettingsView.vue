@@ -14,9 +14,91 @@ import {
 const auth = useAuthStore();
 const router = useRouter();
 
+import type { DayScheduleItem } from '@/api/types';
+
 const displayName = ref(auth.user?.displayName ?? '');
 const periodsPerDay = ref(auth.user?.settings.periodsPerDay ?? 8);
 const showWeekend = ref(auth.user?.settings.showWeekend ?? false);
+
+// --- day schedule (作息时间表) ---
+const DEFAULT_DAY_SCHEDULE: DayScheduleItem[] = [
+  { key: 'morning_reading', kind: 'activity', label: '早读', start: '07:30', end: '07:50' },
+  { key: 'p1', kind: 'lesson', label: '第1节', start: '08:00', end: '08:45', period: 1 },
+  { key: 'p2', kind: 'lesson', label: '第2节', start: '09:00', end: '09:45', period: 2 },
+  { key: 'eye_exercise_1', kind: 'activity', label: '眼操', start: '09:45', end: '09:50' },
+  { key: 'p3', kind: 'lesson', label: '第3节', start: '10:00', end: '10:40', period: 3 },
+  { key: 'p4', kind: 'lesson', label: '第4节', start: '10:55', end: '11:35', period: 4 },
+  { key: 'lunch', kind: 'activity', label: '午餐', start: '11:35', end: '12:05' },
+  { key: 'nap', kind: 'activity', label: '午休', start: '12:45', end: '13:25' },
+  { key: 'p5', kind: 'lesson', label: '第5节', start: '13:40', end: '14:25', period: 5 },
+  { key: 'eye_exercise_2', kind: 'activity', label: '眼操', start: '14:25', end: '14:30' },
+  { key: 'big_break', kind: 'activity', label: '大课间', start: '14:30', end: '15:25' },
+  { key: 'p6', kind: 'lesson', label: '第6节', start: '15:25', end: '16:10', period: 6 },
+  { key: 'p7', kind: 'lesson', label: '第7节', start: '16:20', end: '17:00', period: 7 },
+  { key: 'p8', kind: 'lesson', label: '第8节', start: '17:10', end: '17:50', period: 8 },
+];
+
+const daySchedule = ref<DayScheduleItem[]>(
+  JSON.parse(
+    JSON.stringify(
+      auth.user?.settings.daySchedule?.length
+        ? auth.user.settings.daySchedule
+        : DEFAULT_DAY_SCHEDULE,
+    ),
+  ),
+);
+
+function addRow() {
+  daySchedule.value.push({
+    key: `row_${Date.now()}`,
+    kind: 'activity',
+    label: '新活动',
+    start: '12:00',
+    end: '12:30',
+  });
+}
+
+function removeRow(i: number) {
+  daySchedule.value.splice(i, 1);
+}
+
+function moveRow(i: number, delta: number) {
+  const j = i + delta;
+  if (j < 0 || j >= daySchedule.value.length) return;
+  const [row] = daySchedule.value.splice(i, 1);
+  daySchedule.value.splice(j, 0, row);
+}
+
+function resetDaySchedule() {
+  daySchedule.value = JSON.parse(JSON.stringify(DEFAULT_DAY_SCHEDULE));
+}
+
+async function saveDaySchedule() {
+  error.value = '';
+  message.value = '';
+  for (const it of daySchedule.value) {
+    if (!/^([01]?\d|2[0-3]):[0-5]\d$/.test(it.start) || !/^([01]?\d|2[0-3]):[0-5]\d$/.test(it.end)) {
+      error.value = `“${it.label}”的时间格式应为 HH:MM`;
+      return;
+    }
+    if (it.start >= it.end) {
+      error.value = `“${it.label}”的开始时间应早于结束时间`;
+      return;
+    }
+    if (!it.label.trim()) {
+      error.value = '每一行都需要填写名称';
+      return;
+    }
+  }
+  try {
+    await auth.updateSettings({ daySchedule: daySchedule.value });
+    // Server sorts + renumbers periods; adopt its version.
+    daySchedule.value = JSON.parse(JSON.stringify(auth.user?.settings.daySchedule ?? []));
+    message.value = '✓ 作息时间表已保存';
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.message : '保存失败';
+  }
+}
 
 // --- push reminders ---
 const pushRemindersEnabled = ref(auth.user?.settings.pushRemindersEnabled ?? false);
@@ -208,6 +290,37 @@ async function logout() {
       </section>
 
       <section class="card">
+        <div class="card-title">作息时间表</div>
+        <p class="hint">
+          用于日程表的时段排布。「课程」行对应排课节次（按出现顺序自动编号），
+          「活动」行是眼操、午餐、午休、大课间等固定事件。
+        </p>
+
+        <div class="ds-list">
+          <div v-for="(row, i) in daySchedule" :key="row.key" class="ds-row">
+            <input v-model="row.label" class="input ds-label" maxlength="24" />
+            <select v-model="row.kind" class="select ds-kind">
+              <option value="lesson">课程</option>
+              <option value="activity">活动</option>
+            </select>
+            <input v-model="row.start" class="input ds-time" type="time" />
+            <span class="ds-dash">–</span>
+            <input v-model="row.end" class="input ds-time" type="time" />
+            <button class="btn btn-sm" title="上移" @click="moveRow(i, -1)">↑</button>
+            <button class="btn btn-sm" title="下移" @click="moveRow(i, 1)">↓</button>
+            <button class="btn btn-sm btn-danger" title="删除" @click="removeRow(i)">×</button>
+          </div>
+        </div>
+
+        <div class="row" style="margin-top: 10px; gap: 8px">
+          <button class="btn btn-sm" @click="addRow">+ 添加一行</button>
+          <button class="btn btn-sm" @click="resetDaySchedule">恢复默认</button>
+          <div class="spacer" />
+          <button class="btn btn-primary" @click="saveDaySchedule">保存作息</button>
+        </div>
+      </section>
+
+      <section class="card">
         <div class="card-title">推送提醒</div>
         <p class="hint">在课程或待办开始前提醒你。支持浏览器与已安装的 PWA，关闭页面也能收到。</p>
 
@@ -257,6 +370,11 @@ async function logout() {
             发送测试通知
           </button>
         </div>
+
+        <p class="hint" style="margin-top: 12px">
+          <RouterLink :to="{ name: 'devices' }">设备管理</RouterLink>
+          — 查看关联的推送设备与登录会话，可远程下线某台设备。
+        </p>
       </section>
 
       <section class="card">
@@ -311,4 +429,15 @@ async function logout() {
 <style scoped>
 .narrow { max-width: 520px; }
 .check { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+
+.ds-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.ds-row { display: flex; align-items: center; gap: 6px; }
+.ds-label { flex: 1; min-width: 80px; }
+.ds-kind { width: 76px; }
+.ds-time { width: 104px; }
+.ds-dash { color: var(--text-faint); }
+@media (max-width: 560px) {
+  .ds-row { flex-wrap: wrap; }
+  .ds-label { flex-basis: 100%; }
+}
 </style>

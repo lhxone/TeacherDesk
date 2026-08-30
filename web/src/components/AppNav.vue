@@ -122,12 +122,15 @@ async function logout() {
 .tabbar {
   position: fixed;
   inset: auto 0 0 0;
-  height: var(--nav-height);
+  /* The bar itself is --nav-height tall; the safe-area inset is extra space
+     below it so the tab contents stay vertically centred in the visible bar
+     instead of being squeezed upward on notched phones. */
+  height: calc(var(--nav-height) + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
   background: var(--surface);
   border-top: 1px solid var(--border);
   display: flex;
   z-index: 30;
-  padding-bottom: env(safe-area-inset-bottom);
 }
 
 .tab {
@@ -136,9 +139,11 @@ async function logout() {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 3px;
+  padding: 6px 0;
   color: var(--text-faint);
   font-size: 11px;
+  line-height: 1.2;
 }
 
 .tab.active { color: var(--brand); }

@@ -7,6 +7,11 @@ import {
   weekIndex,
   weekParity,
 } from '../src/lib/schedule.js';
+import {
+  DEFAULT_DAY_SCHEDULE,
+  lessonPeriodTimes,
+  normalizeDaySchedule,
+} from '../src/lib/daySchedule.js';
 
 const d = (s: string) => new Date(`${s}T00:00:00.000Z`);
 
@@ -78,6 +83,41 @@ describe('schedule: slot occurrence', () => {
   it('has no date bounds when startDate and endDate are null', () => {
     const slot = { weekday: 3, repeatRule: 'weekly', startDate: null, endDate: null };
     expect(slotOccursOn(slot, d('2020-01-01'))).toBe(true); // a Wednesday
+  });
+});
+
+describe('daySchedule', () => {
+  it('derives legacy periodTimes from the default schedule, 8 lessons', () => {
+    const times = lessonPeriodTimes(DEFAULT_DAY_SCHEDULE);
+    expect(times).toHaveLength(8);
+    expect(times[0]).toEqual(['08:00', '08:45']);
+    expect(times[1]).toEqual(['09:00', '09:45']);
+    expect(times[7]).toEqual(['17:10', '17:50']);
+  });
+
+  it('falls back to the default schedule when given null/empty', () => {
+    expect(lessonPeriodTimes(null)).toHaveLength(8);
+    expect(lessonPeriodTimes([])).toHaveLength(8);
+  });
+
+  it('normalizeDaySchedule sorts by start time and renumbers lesson periods', () => {
+    const out = normalizeDaySchedule([
+      { key: 'b', kind: 'activity', label: '午餐', start: '12:00', end: '12:30' },
+      { key: 'a', kind: 'lesson', label: '第X节', start: '08:00', end: '08:45' },
+      { key: 'c', kind: 'lesson', label: '第Y节', start: '13:00', end: '13:45' },
+    ]);
+    expect(out.map((i) => i.label)).toEqual(['第X节', '午餐', '第Y节']);
+    expect(out[0].period).toBe(1);
+    expect(out[2].period).toBe(2);
+    expect(out[1].period).toBeUndefined();
+  });
+
+  it('normalizeDaySchedule rejects start >= end', () => {
+    expect(() =>
+      normalizeDaySchedule([
+        { key: 'a', kind: 'lesson', label: 'x', start: '09:00', end: '09:00' },
+      ]),
+    ).toThrow();
   });
 });
 

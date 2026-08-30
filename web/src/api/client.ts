@@ -22,6 +22,7 @@ const BASE = '/api/v1';
 
 const ACCESS_KEY = 'td_access_token';
 const REFRESH_KEY = 'td_refresh_token';
+const SESSION_KEY = 'td_session_id';
 
 export const tokenStore = {
   get access() {
@@ -30,13 +31,19 @@ export const tokenStore = {
   get refresh() {
     return localStorage.getItem(REFRESH_KEY);
   },
-  set(access: string, refresh: string) {
+  /** id of this browser's refresh-token row, so device management can flag "this device". */
+  get session() {
+    return localStorage.getItem(SESSION_KEY);
+  },
+  set(access: string, refresh: string, sessionId?: string | null) {
     localStorage.setItem(ACCESS_KEY, access);
     localStorage.setItem(REFRESH_KEY, refresh);
+    if (sessionId) localStorage.setItem(SESSION_KEY, sessionId);
   },
   clear() {
     localStorage.removeItem(ACCESS_KEY);
     localStorage.removeItem(REFRESH_KEY);
+    localStorage.removeItem(SESSION_KEY);
   },
 };
 
@@ -85,7 +92,7 @@ async function refreshTokens(): Promise<boolean> {
         });
         if (!res.ok) return false;
         const body = await res.json();
-        tokenStore.set(body.data.accessToken, body.data.refreshToken);
+        tokenStore.set(body.data.accessToken, body.data.refreshToken, body.data.sessionId);
         return true;
       } catch {
         return false;

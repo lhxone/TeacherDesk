@@ -44,6 +44,8 @@ model PushSubscription {
   p256dh    String   @db.VarChar(255)
   auth      String   @db.VarChar(255)
   userAgent String?  @map("user_agent") @db.VarChar(255)
+  label     String?  @db.VarChar(64)
+  lastSeenAt DateTime? @map("last_seen_at") @db.Timestamptz(6)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
