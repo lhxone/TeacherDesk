@@ -1,0 +1,296 @@
+generator client {
+  provider = "prisma-client-js"
+  // Alpine/musl images must name their engine target explicitly. Without this
+  // the CLI mis-detects openssl, looks for a plain `linux-musl` engine that is
+  // not vendored, and tries to download one at container start.
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String    @id @default(uuid()) @db.Uuid
+  email        String    @unique @db.VarChar(255)
+  passwordHash String    @map("password_hash") @db.VarChar(255)
+  displayName  String    @map("display_name") @db.VarChar(64)
+  avatarUrl    String?   @map("avatar_url") @db.VarChar(512)
+  settings     Json      @default("{}")
+  lastLoginAt  DateTime? @map("last_login_at") @db.Timestamptz(6)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt    DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  refreshTokens RefreshToken[]
+  classes       Class[]
+  scheduleSlots ScheduleSlot[]
+  events        Event[]
+  tags          Tag[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  tokenHash  String    @unique @map("token_hash") @db.VarChar(64)
+  deviceInfo String?   @map("device_info") @db.VarChar(255)
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@map("refresh_tokens")
+}
+
+model Class {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  name         String    @db.VarChar(64)
+  subject      String?   @db.VarChar(32)
+  academicYear String    @map("academic_year") @db.VarChar(16)
+  color        String    @default("#3B82F6") @db.VarChar(16)
+  note         String?
+  status       String    @default("active") @db.VarChar(16)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt    DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  students       Student[]
+  scheduleSlots  ScheduleSlot[]
+  events         Event[]
+  seatingCharts  SeatingChart[]
+  exams          Exam[]
+  lotteryRecords LotteryRecord[]
+  groupingPlans  GroupingPlan[]
+
+  @@index([userId, status])
+  @@map("classes")
+}
+
+model Student {
+  id        String    @id @default(uuid()) @db.Uuid
+  classId   String    @map("class_id") @db.Uuid
+  name      String    @db.VarChar(64)
+  studentNo String?   @map("student_no") @db.VarChar(32)
+  gender    String?   @db.VarChar(8)
+  avatarUrl String?   @map("avatar_url") @db.VarChar(512)
+  phone     String?   @db.VarChar(32)
+  note      String?
+  sortOrder Int       @default(0) @map("sort_order")
+  status    String    @default("active") @db.VarChar(16)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  class           Class            @relation(fields: [classId], references: [id], onDelete: Cascade)
+  studentTags     StudentTag[]
+  seatAssignments SeatAssignment[]
+  scores          Score[]
+  lotteryRecords  LotteryRecord[]
+  groupMembers    GroupMember[]
+
+  @@index([classId, status])
+  @@map("students")
+}
+
+model Tag {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  name      String   @db.VarChar(32)
+  color     String   @default("#10B981") @db.VarChar(16)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  studentTags StudentTag[]
+
+  @@unique([userId, name])
+  @@map("tags")
+}
+
+model StudentTag {
+  studentId String   @map("student_id") @db.Uuid
+  tagId     String   @map("tag_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([studentId, tagId])
+  @@map("student_tags")
+}
+
+model ScheduleSlot {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  classId    String?   @map("class_id") @db.Uuid
+  subject    String?   @db.VarChar(32)
+  weekday    Int       @db.SmallInt
+  period     Int       @db.SmallInt
+  location   String?   @db.VarChar(64)
+  repeatRule String    @default("weekly") @map("repeat_rule") @db.VarChar(16)
+  startDate  DateTime? @map("start_date") @db.Date
+  endDate    DateTime? @map("end_date") @db.Date
+  note       String?
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt  DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  class Class? @relation(fields: [classId], references: [id], onDelete: SetNull)
+
+  @@index([userId, weekday])
+  @@map("schedule_slots")
+}
+
+model Event {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  classId     String?   @map("class_id") @db.Uuid
+  title       String    @db.VarChar(128)
+  description String?
+  startAt     DateTime  @map("start_at") @db.Timestamptz(6)
+  endAt       DateTime? @map("end_at") @db.Timestamptz(6)
+  allDay      Boolean   @default(false) @map("all_day")
+  isDone      Boolean   @default(false) @map("is_done")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  class Class? @relation(fields: [classId], references: [id], onDelete: SetNull)
+
+  @@index([userId, startAt])
+  @@map("events")
+}
+
+model SeatingChart {
+  id        String    @id @default(uuid()) @db.Uuid
+  classId   String    @map("class_id") @db.Uuid
+  name      String    @db.VarChar(64)
+  rowCount  Int       @map("row_count") @db.SmallInt
+  colCount  Int       @map("col_count") @db.SmallInt
+  layout    Json      @default("{}")
+  isActive  Boolean   @default(false) @map("is_active")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  class       Class            @relation(fields: [classId], references: [id], onDelete: Cascade)
+  assignments SeatAssignment[]
+
+  @@index([classId])
+  @@map("seating_charts")
+}
+
+model SeatAssignment {
+  id             String  @id @default(uuid()) @db.Uuid
+  seatingChartId String  @map("seating_chart_id") @db.Uuid
+  studentId      String  @map("student_id") @db.Uuid
+  rowIndex       Int     @map("row_index") @db.SmallInt
+  colIndex       Int     @map("col_index") @db.SmallInt
+  isPinned       Boolean @default(false) @map("is_pinned")
+
+  seatingChart SeatingChart @relation(fields: [seatingChartId], references: [id], onDelete: Cascade)
+  student      Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([seatingChartId, rowIndex, colIndex])
+  @@unique([seatingChartId, studentId])
+  @@map("seat_assignments")
+}
+
+model Exam {
+  id         String    @id @default(uuid()) @db.Uuid
+  classId    String    @map("class_id") @db.Uuid
+  name       String    @db.VarChar(64)
+  subject    String?   @db.VarChar(32)
+  examType   String    @default("daily") @map("exam_type") @db.VarChar(16)
+  examDate   DateTime  @map("exam_date") @db.Date
+  fullScore  Decimal   @default(100) @map("full_score") @db.Decimal(6, 2)
+  note       String?
+  statsCache Json?     @map("stats_cache")
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt  DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  class  Class   @relation(fields: [classId], references: [id], onDelete: Cascade)
+  scores Score[]
+
+  @@index([classId, examDate])
+  @@map("exams")
+}
+
+model Score {
+  id        String   @id @default(uuid()) @db.Uuid
+  examId    String   @map("exam_id") @db.Uuid
+  studentId String   @map("student_id") @db.Uuid
+  score     Decimal? @db.Decimal(6, 2)
+  isAbsent  Boolean  @default(false) @map("is_absent")
+  comment   String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  exam    Exam    @relation(fields: [examId], references: [id], onDelete: Cascade)
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([examId, studentId])
+  @@index([studentId])
+  @@map("scores")
+}
+
+model LotteryRecord {
+  id        String   @id @default(uuid()) @db.Uuid
+  classId   String   @map("class_id") @db.Uuid
+  studentId String   @map("student_id") @db.Uuid
+  mode      String   @default("plain") @db.VarChar(16)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  class   Class   @relation(fields: [classId], references: [id], onDelete: Cascade)
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([classId, createdAt])
+  @@map("lottery_records")
+}
+
+model GroupingPlan {
+  id        String    @id @default(uuid()) @db.Uuid
+  classId   String    @map("class_id") @db.Uuid
+  name      String    @db.VarChar(64)
+  options   Json      @default("{}")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  class  Class   @relation(fields: [classId], references: [id], onDelete: Cascade)
+  groups Group[]
+
+  @@index([classId])
+  @@map("grouping_plans")
+}
+
+model Group {
+  id             String @id @default(uuid()) @db.Uuid
+  groupingPlanId String @map("grouping_plan_id") @db.Uuid
+  name           String @db.VarChar(64)
+  groupIndex     Int    @map("group_index") @db.SmallInt
+
+  groupingPlan GroupingPlan  @relation(fields: [groupingPlanId], references: [id], onDelete: Cascade)
+  members      GroupMember[]
+
+  @@map("groups")
+}
+
+model GroupMember {
+  groupId   String @map("group_id") @db.Uuid
+  studentId String @map("student_id") @db.Uuid
+
+  group   Group   @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, studentId])
+  @@map("group_members")
+}

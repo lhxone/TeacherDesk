@@ -1,0 +1,17 @@
+# Optional local-build override. Production deployments should use only
+# docker-compose.yml and pull the immutable images published to GHCR.
+services:
+  migrate:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+
+  api:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile

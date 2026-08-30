@@ -1,0 +1,106 @@
+# TeacherDesk — NAS deployment behind a Cloudflare Tunnel.
+#
+# No `ports:` are published anywhere on purpose: nothing on the NAS is reachable
+# from the LAN or the internet directly. The only egress is cloudflared's
+# outbound connection to Cloudflare, which then serves
+# https://t-desk.buildlink.cc.
+#
+# Traffic path:
+#   browser -> Cloudflare edge -> tunnel -> web (nginx) -> /api -> api -> db
+
+services:
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-teacherdesk}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-teacherdesk}
+      # Deterministic collation so ORDER BY on Chinese names is stable.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./deploy/db-init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-teacherdesk} -d ${POSTGRES_DB:-teacherdesk}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # One-shot: applies the Prisma schema and the partial indexes, then exits.
+  # The api service waits for it to finish successfully before starting.
+  migrate:
+    # Reuse the api image rather than declaring a second build of the same
+    # context: two build entries produce two independently-cached images, which
+    # silently drift apart when only one is rebuilt.
+    image: ghcr.io/lhxone/teacherdesk-api:${TEACHERDESK_IMAGE_TAG:-latest}
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-teacherdesk}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-teacherdesk}?schema=public
+    networks:
+      - internal
+    depends_on:
+      db:
+        condition: service_healthy
+    # Invoke the vendored CLI directly. `npx prisma` would try to fetch the
+    # package from the network (and fail, unprivileged) instead of using the
+    # copy already in node_modules.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        PRISMA=./node_modules/.bin/prisma
+        echo "applying prisma schema..."
+        $$PRISMA db push --skip-generate
+        echo "applying partial indexes..."
+        $$PRISMA db execute --file prisma/partial-indexes.sql --schema prisma/schema.prisma
+        echo "migrations complete"
+
+  api:
+    image: ghcr.io/lhxone/teacherdesk-api:${TEACHERDESK_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOST: 0.0.0.0
+      DATABASE_URL: postgresql://${POSTGRES_USER:-teacherdesk}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-teacherdesk}?schema=public
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      BCRYPT_ROUNDS: ${BCRYPT_ROUNDS:-12}
+      # Same-origin deployment: nginx proxies /api, so the browser never makes
+      # a cross-origin request. Kept explicit as defence in depth.
+      CORS_ORIGINS: ${PUBLIC_ORIGIN:-https://t-desk.buildlink.cc}
+    networks:
+      - internal
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  web:
+    image: ghcr.io/lhxone/teacherdesk-web:${TEACHERDESK_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    networks:
+      - internal
+    depends_on:
+      - api
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    # Outbound-only: cloudflared dials Cloudflare, nothing dials in.
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:?CLOUDFLARE_TUNNEL_TOKEN is required}
+    networks:
+      - internal
+    depends_on:
+      - web
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  db-data:
