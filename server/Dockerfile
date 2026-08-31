@@ -11,7 +11,8 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci
 
-COPY prisma/schema.prisma prisma/partial-indexes.sql ./prisma/
+COPY prisma/schema.prisma ./prisma/
+COPY prisma/migrations ./prisma/migrations/
 RUN npx prisma generate
 
 COPY tsconfig.json tsconfig.build.json ./
@@ -20,7 +21,7 @@ RUN npx tsc -p tsconfig.build.json
 
 # No prune: the migrate service shells out to the Prisma CLI, which lives in
 # devDependencies. Pruning and reinstalling it leaves a partial tree that makes
-# `db push` fail with a misleading "can't write to @prisma/engines".
+# `migrate deploy` fail with a misleading "can't write to @prisma/engines".
 
 # ---------- runtime ----------
 FROM node:20-alpine AS runtime

@@ -52,11 +52,7 @@ services:
     command:
       - |
         set -e
-        PRISMA=./node_modules/.bin/prisma
-        echo "applying prisma schema..."
-        $$PRISMA db push --skip-generate
-        echo "applying partial indexes..."
-        $$PRISMA db execute --file prisma/partial-indexes.sql --schema prisma/schema.prisma
+        ./node_modules/.bin/prisma migrate deploy
         echo "migrations complete"
 
   api:
