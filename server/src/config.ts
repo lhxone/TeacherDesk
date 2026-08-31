@@ -21,9 +21,10 @@ export const config = {
   vapidSubject: process.env.VAPID_SUBJECT ?? 'mailto:admin@teacherdesk.app',
   // How often the reminder scheduler scans for upcoming lessons/todos.
   reminderScanIntervalMs: Number(process.env.REMINDER_SCAN_INTERVAL_MS ?? 60_000),
-  // Lesson period times ("08:00") are wall-clock in the teachers' timezone.
-  // The server runs in UTC, so this offset (minutes east of UTC; 480 = UTC+8)
-  // turns a period's wall time on a given day into a real instant.
+  // Lesson period times ("08:00") are wall-clock in each teacher's own timezone
+  // (`user.settings.timeZone`, an IANA name). This fixed minutes-east-of-UTC
+  // offset is only the fallback used for a user who has never set one — do not
+  // use it as if it applied to everyone; the server itself has no "local" zone.
   localTzOffsetMinutes: Number(process.env.LOCAL_TZ_OFFSET_MINUTES ?? 480),
 };
 
@@ -46,4 +47,9 @@ export const DEFAULT_SETTINGS = {
   // start the notification fires.
   pushRemindersEnabled: false,
   remindBeforeMinutes: 5,
+  // IANA time zone (e.g. "Asia/Shanghai") the user's day schedule is wall-clock
+  // in. This app is public and teachers can be anywhere, so reminders must be
+  // computed per-user — never assume everyone is in the server's zone. Falls
+  // back to `config.localTzOffsetMinutes` only for users who never set one.
+  timeZone: null as string | null,
 };

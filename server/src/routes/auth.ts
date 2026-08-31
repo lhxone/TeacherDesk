@@ -7,6 +7,7 @@ import { ApiError } from '../errors.js';
 import { requireUser } from '../app.js';
 import { describeUserAgent } from '../lib/device.js';
 import { normalizeDaySchedule } from '../lib/daySchedule.js';
+import { isValidTimeZone } from '../lib/timezone.js';
 import {
   assertNotLocked,
   clearLoginFailures,
@@ -207,6 +208,12 @@ export async function registerAuthRoutes(app: FastifyInstance) {
                 s.remindBeforeMinutes >= 1 &&
                 s.remindBeforeMinutes <= 120),
             { message: 'remindBeforeMinutes 需在 1–120 之间' },
+          )
+          .refine(
+            (s) =>
+              s.timeZone === undefined || s.timeZone === null ||
+              (typeof s.timeZone === 'string' && isValidTimeZone(s.timeZone)),
+            { message: 'timeZone 不是有效的 IANA 时区名称' },
           )
           .optional(),
       })

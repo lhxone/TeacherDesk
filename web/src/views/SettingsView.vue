@@ -108,10 +108,28 @@ const pushMsg = ref('');
 const canPush = ref(false);
 const permission = ref<NotificationPermission>('default');
 
+// This app is public and teachers can be in any timezone, so reminders must be
+// computed against *this* browser's zone — never assume the server's zone.
+const detectedTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+const timeZone = ref(auth.user?.settings.timeZone || detectedTimeZone);
+const timeZoneSaved = ref(Boolean(auth.user?.settings.timeZone));
+
 onMounted(() => {
   canPush.value = pushSupported();
   permission.value = pushPermission();
 });
+
+async function saveTimeZone() {
+  pushMsg.value = '';
+  error.value = '';
+  try {
+    await auth.updateSettings({ timeZone: timeZone.value });
+    timeZoneSaved.value = true;
+    pushMsg.value = '✓ 时区已保存';
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.message : '保存失败';
+  }
+}
 
 async function togglePush(on: boolean) {
   pushBusy.value = true;
@@ -128,6 +146,13 @@ async function togglePush(on: boolean) {
             ? '浏览器已拒绝通知权限，请在站点设置中手动开启'
             : '开启推送失败，可能是浏览器不支持或服务端未配置';
         return;
+      }
+      // First time enabling push: lock in the browser's own timezone so
+      // reminder times are computed correctly, unless already set explicitly.
+      if (!timeZoneSaved.value) {
+        timeZone.value = detectedTimeZone;
+        await auth.updateSettings({ timeZone: detectedTimeZone });
+        timeZoneSaved.value = true;
       }
     } else {
       await disablePush();
@@ -340,6 +365,18 @@ async function logout() {
             />
             <span>开启推送提醒</span>
           </label>
+
+          <div class="field">
+            <label>时区</label>
+            <input v-model="timeZone" class="input" placeholder="Asia/Shanghai" />
+            <p class="hint">
+              课程与待办提醒都按这个时区计算触发时间。已按当前浏览器自动填入
+              {{ detectedTimeZone }}，换设备/换地区后请重新确认。
+            </p>
+            <button class="btn btn-sm btn-primary" style="align-self: flex-start" @click="saveTimeZone">
+              保存时区
+            </button>
+          </div>
 
           <div class="field">
             <label>提前提醒时间（分钟）</label>

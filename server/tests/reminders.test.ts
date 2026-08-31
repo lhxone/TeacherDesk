@@ -158,6 +158,38 @@ describe('reminder scan: lessons', () => {
     expect(sent[0].payload).toMatchObject({ title: '语文 即将开始' });
   });
 
+  it('uses the user\'s own timeZone instead of the server-wide fallback', async () => {
+    // This app is public and teachers can be in any timezone — a teacher in
+    // America/New_York with an 08:00 first period must be reminded relative
+    // to New York time, not the UTC+8 fallback used elsewhere in this file.
+    await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/auth/me',
+      headers: user.auth,
+      payload: { settings: { pushRemindersEnabled: true, remindBeforeMinutes: 5, timeZone: 'America/New_York' } },
+    });
+    const classId = await createClass(app, user);
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/schedule/slots',
+      headers: user.auth,
+      payload: { classId, subject: '数学', weekday: 1, period: 1, repeatRule: 'weekly' },
+    });
+
+    // 2026-09-14 is a Monday. First period 08:00 America/New_York (EDT, UTC-4)
+    // == 12:00 UTC. 5 minutes before is 11:56 UTC.
+    const tooEarlyForUtc8 = await runReminderScan(new Date('2026-09-14T11:56:00.000Z'));
+    expect(tooEarlyForUtc8).toBe(1);
+    expect(sent[0].payload).toMatchObject({ title: '数学 即将开始' });
+
+    // The old UTC+8-only fallback would have fired 16 hours earlier (23:56 the
+    // 13th); confirm nothing fires there for this user.
+    sent.length = 0;
+    await prisma.sentReminder.deleteMany({ where: { userId: user.id } });
+    const atUtc8Instant = await runReminderScan(new Date('2026-09-13T23:56:00.000Z'));
+    expect(atUtc8Instant).toBe(0);
+  });
+
   it('does not push for a lesson on a different weekday', async () => {
     await enableReminders(5);
     const classId = await createClass(app, user);
