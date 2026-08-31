@@ -270,6 +270,18 @@ Query：`q`（姓名 / 学号模糊搜索）、`tagIds`（逗号分隔）、`sta
 
 ---
 
+### GET /classes/{classId}/students/import-template — 下载学生导入模板
+
+响应 `200`：`.xlsx` 文件（`Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`），
+表头为 学号 / 姓名 / 性别 / 联系电话，空白待填写。
+
+### POST /classes/{classId}/students/import-file — 上传学生导入模板
+
+请求：`multipart/form-data`，字段 `file` 为填好的 `.xlsx` 文件；query 参数 `dryRun`（默认 `true`）。
+解析结果与 `bulk-import` 响应结构相同（`total/valid/invalid/created/dryRun/rows`）。非 `.xlsx` 或空文件 → `400 VALIDATION_ERROR`。
+
+---
+
 ### GET /students/{studentId} — 学生详情
 
 响应 `200`：基础字段 + 聚合信息
@@ -624,6 +636,19 @@ Query：`subject`、`examType`、`from`、`to`、分页、`sort`（默认 `-exam
 
 ### PATCH /exams/{examId}/scores/{studentId} — 单条更新（录入页实时保存用）
 
+### GET /exams/{examId}/scores/template — 下载成绩导入模板
+
+响应 `200`：`.xlsx` 文件，预填当前班级花名册（学号 / 姓名）及已录入的 分数 / 缺考。
+
+### POST /exams/{examId}/scores/import-file — 上传成绩导入模板
+
+请求：`multipart/form-data`，字段 `file` 为填好的 `.xlsx` 文件。按 学号 匹配学生，未填学号则按 姓名 回退匹配。
+
+响应 `200`：`{ "data": { "matched": 2, "skipped": ["未知同学"], "scores": [{ "studentId": "stu_a", "score": 88, "isAbsent": false }] } }`
+
+仅返回匹配结果，不落库——前端合并进当前录入表格后仍需调用 `PUT /exams/{examId}/scores` 保存。
+`score > fullScore` → `400 VALIDATION_ERROR`；一个学生都未匹配到 → `400 VALIDATION_ERROR`。
+
 ---
 
 ## 11. 成绩分析 Analytics
@@ -759,6 +784,12 @@ Query：`format`（`csv` | `xlsx`，默认 `csv`）、`examIds`（逗号分隔�
 提前分钟数与总开关存在 `PATCH /auth/me` 的 `settings` 中：
 `{ "pushRemindersEnabled": true, "remindBeforeMinutes": 5 }`（`remindBeforeMinutes` 取值 1–120）。
 
+课程提醒的触发时刻按 `settings.timeZone`（IANA 时区名，如 `"Asia/Shanghai"`）把作息表
+的钟表时间换算成真实时刻——本应用面向公众，教师可能身处任意时区，因此这是**按用户**
+存储的，而非服务端全局配置。未设置时回退到服务端环境变量 `LOCAL_TZ_OFFSET_MINUTES`
+（默认 UTC+8），仅作为兼容旧数据的兜底，不代表所有用户都在同一时区。前端在首次开启
+推送时会用浏览器的 `Intl.DateTimeFormat().resolvedOptions().timeZone` 自动写入。
+
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/push/vapid-public-key` | `{ "data": { "key": "<VAPID 公钥或 null>", "enabled": <服务端是否配置了 VAPID> } }` |
@@ -813,14 +844,14 @@ Query：`format`（`csv` | `xlsx`，默认 `csv`）、`examIds`（逗号分隔�
 |---|---|
 | Auth | `POST /auth/register`、`POST /auth/login`、`POST /auth/refresh`、`POST /auth/logout`、`GET /auth/me`、`PATCH /auth/me`、`POST /auth/change-password` |
 | Classes | `GET /classes`、`POST /classes`、`GET|PATCH|DELETE /classes/{id}` |
-| Students | `GET|POST /classes/{id}/students`、`POST /classes/{id}/students/bulk-import`、`PATCH /classes/{id}/students/batch`、`GET|PATCH|DELETE /students/{id}` |
+| Students | `GET|POST /classes/{id}/students`、`POST /classes/{id}/students/bulk-import`、`GET /classes/{id}/students/import-template`、`POST /classes/{id}/students/import-file`、`PATCH /classes/{id}/students/batch`、`GET|PATCH|DELETE /students/{id}` |
 | Tags | `GET|POST /tags`、`PATCH|DELETE /tags/{id}` |
 | Schedule | `GET|POST /schedule/slots`、`PATCH|DELETE /schedule/slots/{id}`、`GET /schedule/agenda` |
 | Events | `GET|POST /events`、`PATCH|DELETE /events/{id}` |
 | Seating | `GET|POST /classes/{id}/seating-charts`、`GET|PATCH|DELETE /seating-charts/{id}`、`PUT /seating-charts/{id}/assignments`、`POST /seating-charts/{id}/randomize` |
 | Tools | `POST /classes/{id}/lottery/draw`、`POST /classes/{id}/lottery/reset`、`GET /classes/{id}/lottery/records`、`POST /classes/{id}/grouping/generate`、`GET /classes/{id}/grouping/plans`、`GET|DELETE /grouping-plans/{id}` |
 | Exams | `GET|POST /classes/{id}/exams`、`GET|PATCH|DELETE /exams/{id}` |
-| Scores | `GET|PUT /exams/{id}/scores`、`PATCH /exams/{id}/scores/{studentId}` |
+| Scores | `GET|PUT /exams/{id}/scores`、`PATCH /exams/{id}/scores/{studentId}`、`GET /exams/{id}/scores/template`、`POST /exams/{id}/scores/import-file` |
 | Analytics | `GET /analytics/class/{id}/exam/{examId}`、`GET /analytics/class/{id}/trend`、`GET /analytics/class/compare`、`GET /analytics/student/{id}` |
 | Export | `GET /exports/class/{id}/scores`、`GET /exports/class/{id}/students` |
 | Upload | `POST /uploads/avatar` |

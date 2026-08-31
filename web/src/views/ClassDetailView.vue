@@ -38,6 +38,8 @@ const showImport = ref(false);
 const importText = ref('');
 const importPreview = ref<{ total: number; valid: number; invalid: number; rows: ImportRow[] } | null>(null);
 const importing = ref(false);
+const importFileInput = ref<HTMLInputElement | null>(null);
+const importFile = ref<File | null>(null);
 
 type ImportRow = {
   index: number;
@@ -179,6 +181,7 @@ function parseImport(text: string) {
 async function previewImport() {
   const parsed = parseImport(importText.value);
   if (!parsed.length) return;
+  importFile.value = null;
   importing.value = true;
   try {
     const res = await api.post<Envelope<typeof importPreview.value>>(
@@ -194,19 +197,70 @@ async function previewImport() {
 }
 
 async function confirmImport() {
-  const parsed = parseImport(importText.value);
   importing.value = true;
   try {
-    await api.post(`/classes/${props.classId}/students/bulk-import`, {
-      dryRun: false,
-      students: parsed,
-    });
+    if (importFile.value) {
+      await api.upload(`/classes/${props.classId}/students/import-file`, importFile.value, {
+        dryRun: 'false',
+      });
+    } else {
+      const parsed = parseImport(importText.value);
+      await api.post(`/classes/${props.classId}/students/bulk-import`, {
+        dryRun: false,
+        students: parsed,
+      });
+    }
     showImport.value = false;
     importText.value = '';
+    importFile.value = null;
     importPreview.value = null;
     await loadStudents();
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : '导入失败';
+  } finally {
+    importing.value = false;
+  }
+}
+
+function downloadStudentTemplate() {
+  api
+    .blob(`/classes/${props.classId}/students/import-template`)
+    .then((blob) => {
+      const href = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = href;
+      a.download = `${cls.value?.name ?? 'class'}-学生导入模板.xlsx`;
+      a.click();
+      URL.revokeObjectURL(href);
+    })
+    .catch(() => (error.value = '模板下载失败'));
+}
+
+function pickImportFile() {
+  error.value = '';
+  importFileInput.value?.click();
+}
+
+async function handleImportFileChange(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+
+  importFile.value = file;
+  importText.value = '';
+  importing.value = true;
+  error.value = '';
+  try {
+    const res = await api.upload<Envelope<typeof importPreview.value>>(
+      `/classes/${props.classId}/students/import-file`,
+      file,
+      { dryRun: 'true' },
+    );
+    importPreview.value = res.data;
+  } catch (err) {
+    error.value = err instanceof ApiError ? err.message : '解析失败';
+    importFile.value = null;
   } finally {
     importing.value = false;
   }
@@ -338,7 +392,18 @@ watch(() => props.classId, loadAll);
           <input v-model="search" class="input" style="max-width: 220px" placeholder="搜索姓名或学号" />
           <div class="spacer" />
           <button class="btn" @click="exportCsv('students')">导出名册</button>
-          <button class="btn" @click="showImport = true">批量导入</button>
+          <button
+            class="btn"
+            @click="
+              showImport = true;
+              importText = '';
+              importFile = null;
+              importPreview = null;
+              error = '';
+            "
+          >
+            批量导入
+          </button>
           <button class="btn btn-primary" @click="openStudentCreate">+ 添加学生</button>
         </div>
 
@@ -564,17 +629,44 @@ watch(() => props.classId, loadAll);
     <ModalDialog v-if="showImport" title="批量导入学生" wide @close="showImport = false">
       <div class="stack">
         <div class="field">
-          <label>每行一个学生，支持「姓名」或「学号 姓名」</label>
+          <label>方式一：下载 Excel 模板填写后上传</label>
+          <div class="row">
+            <button type="button" class="btn" @click="downloadStudentTemplate">下载模板</button>
+            <button type="button" class="btn" :disabled="importing" @click="pickImportFile">
+              上传模板
+            </button>
+            <input
+              ref="importFileInput"
+              type="file"
+              accept=".xlsx"
+              style="display: none"
+              @change="handleImportFileChange"
+            />
+            <span v-if="importFile" class="hint">已选择：{{ importFile.name }}</span>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>方式二：粘贴文本，每行一个学生，支持「姓名」或「学号 姓名」</label>
           <textarea
             v-model="importText"
             class="textarea"
             style="min-height: 160px; font-family: monospace"
             placeholder="01 张三&#10;02 李四&#10;王五"
+            @input="
+              importFile = null;
+              importPreview = null;
+            "
           />
         </div>
 
         <div class="row">
-          <button class="btn" :disabled="importing || !importText.trim()" @click="previewImport">
+          <button
+            v-if="!importFile"
+            class="btn"
+            :disabled="importing || !importText.trim()"
+            @click="previewImport"
+          >
             预览校验
           </button>
           <span v-if="importPreview" class="hint">

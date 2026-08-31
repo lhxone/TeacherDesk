@@ -15,16 +15,9 @@ import { DEFAULT_SETTINGS } from '../config.js';
 import { sendPushToUser } from './push.js';
 import { formatDate, slotOccursOn } from './schedule.js';
 import { lessonPeriodTimes } from './daySchedule.js';
+import { wallTimeToInstant as wallTimeToInstantTz, startOfLocalDay as startOfLocalDayTz } from './timezone.js';
 
 type Settings = typeof DEFAULT_SETTINGS;
-
-/** Instant of `HH:MM` wall-clock on `day` (a UTC midnight Date), in the configured local zone. */
-function wallTimeToInstant(day: Date, hhmm: string): Date | null {
-  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm);
-  if (!m) return null;
-  const minutes = Number(m[1]) * 60 + Number(m[2]);
-  return new Date(day.getTime() + (minutes - config.localTzOffsetMinutes) * 60_000);
-}
 
 type PushLogger = { warn: (o: unknown, m?: string) => void };
 let scanLogger: PushLogger | undefined;
@@ -40,8 +33,9 @@ export async function runReminderScan(now: Date = new Date()): Promise<number> {
 
     const lead = Math.max(1, settings.remindBeforeMinutes || DEFAULT_SETTINGS.remindBeforeMinutes);
     const windowEnd = new Date(now.getTime() + lead * 60_000);
+    const tz = settings.timeZone ?? null;
 
-    pushed += await remindLessons(user.id, settings, now, windowEnd);
+    pushed += await remindLessons(user.id, settings, tz, now, windowEnd);
     pushed += await remindTodos(user.id, now, windowEnd, lead);
   }
 
@@ -62,10 +56,19 @@ async function markSent(userId: string, kind: string, refId: string, occursAt: D
     .catch(() => {});
 }
 
-async function remindLessons(userId: string, settings: Settings, now: Date, windowEnd: Date) {
+async function remindLessons(
+  userId: string,
+  settings: Settings,
+  tz: string | null,
+  now: Date,
+  windowEnd: Date,
+) {
   const periodTimes = lessonPeriodTimes(settings.daySchedule);
   // A lesson can only start "soon" today or (just past midnight) tomorrow.
-  const days = [startOfLocalDay(now), startOfLocalDay(new Date(windowEnd.getTime()))];
+  const days = [
+    startOfLocalDayTz(now, tz, config.localTzOffsetMinutes),
+    startOfLocalDayTz(windowEnd, tz, config.localTzOffsetMinutes),
+  ];
   const uniqueDays = [...new Map(days.map((d) => [d.getTime(), d])).values()];
 
   const slots = await prisma.scheduleSlot.findMany({
@@ -78,7 +81,9 @@ async function remindLessons(userId: string, settings: Settings, now: Date, wind
     for (const slot of slots) {
       if (!slotOccursOn(slot, day)) continue;
       const times = periodTimes[slot.period - 1];
-      const start = times?.[0] ? wallTimeToInstant(day, times[0]) : null;
+      const start = times?.[0]
+        ? wallTimeToInstantTz(day, times[0], tz, config.localTzOffsetMinutes)
+        : null;
       if (!start) continue;
       if (start < now || start > windowEnd) continue;
 
@@ -128,13 +133,6 @@ async function remindTodos(userId: string, now: Date, windowEnd: Date, lead: num
   }
   void lead;
   return pushed;
-}
-
-function startOfLocalDay(instant: Date): Date {
-  // Local calendar date of `instant`, returned as that date's UTC midnight —
-  // the shape slotOccursOn / formatDate expect.
-  const local = new Date(instant.getTime() + config.localTzOffsetMinutes * 60_000);
-  return new Date(Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate()));
 }
 
 /** Delete ledger rows for occurrences more than a day old. */

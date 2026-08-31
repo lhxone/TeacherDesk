@@ -98,6 +98,29 @@ export async function createStudents(
   return ids;
 }
 
+/**
+ * Build a minimal multipart/form-data body carrying one file field named
+ * "file", for exercising @fastify/multipart-backed import-file endpoints via
+ * app.inject (which has no native multipart helper).
+ */
+export function multipartFile(
+  buffer: Buffer,
+  filename: string,
+  contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+): { headers: Record<string, string>; payload: Buffer } {
+  const boundary = '----testboundary';
+  const head = Buffer.from(
+    `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="file"; filename="${filename}"\r\n` +
+      `Content-Type: ${contentType}\r\n\r\n`,
+  );
+  const tail = Buffer.from(`\r\n--${boundary}--\r\n`);
+  return {
+    headers: { 'content-type': `multipart/form-data; boundary=${boundary}` },
+    payload: Buffer.concat([head, buffer, tail]),
+  };
+}
+
 /** Deterministic RNG for tests that need reproducible shuffles. */
 export function seededRng(seed: number): () => number {
   let s = seed >>> 0;

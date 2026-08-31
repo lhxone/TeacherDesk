@@ -1,5 +1,6 @@
 import Fastify, { FastifyInstance, FastifyRequest } from 'fastify';
 import cors from '@fastify/cors';
+import multipart from '@fastify/multipart';
 import { ZodError } from 'zod';
 import { config } from './config.js';
 import { ApiError } from './errors.js';
@@ -47,6 +48,12 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(cors, {
     origin: config.corsOrigins,
     credentials: true,
+  });
+
+  // Excel template uploads (student roster / score import) only — capped well
+  // above a realistic workbook so a bad file fails fast instead of ballooning memory.
+  await app.register(multipart, {
+    limits: { fileSize: 5 * 1024 * 1024, files: 1 },
   });
 
   // Authentication: populate req.userId, reject protected routes without a token.

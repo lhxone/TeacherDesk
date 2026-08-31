@@ -6,6 +6,12 @@ import { requireUser } from '../app.js';
 import { requireExam } from '../lib/ownership.js';
 import { summarize, type GradeThresholds } from '../lib/stats.js';
 import { DEFAULT_SETTINGS } from '../config.js';
+import {
+  buildTemplateWorkbook,
+  xlsxAttachment,
+  readTemplateRows,
+  requireUploadedFile,
+} from '../lib/excel.js';
 
 export async function thresholdsFor(userId: string): Promise<GradeThresholds> {
   const user = await prisma.user.findFirst({ where: { id: userId } });
@@ -80,6 +86,109 @@ export async function registerScoreRoutes(app: FastifyInstance) {
         }),
       },
     };
+  });
+
+  // Excel template pre-filled with the current roster + any entered scores,
+  // for the teacher to fill in offline and re-upload via import-file below.
+  app.get('/exams/:examId/scores/template', async (req, reply) => {
+    const userId = requireUser(req);
+    const { examId } = z.object({ examId: z.string().uuid() }).parse(req.params);
+    const exam = await requireExam(examId, userId);
+
+    const [students, scores] = await Promise.all([
+      prisma.student.findMany({
+        where: { classId: exam.classId, deletedAt: null, status: 'active' },
+        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+      }),
+      prisma.score.findMany({ where: { examId } }),
+    ]);
+    const byStudent = new Map(scores.map((s) => [s.studentId, s]));
+
+    const columns = [
+      { header: '学号', key: 'no', width: 12 },
+      { header: '姓名', key: 'name', width: 12 },
+      { header: '分数', key: 'score', width: 10 },
+      { header: '缺考（是/否）', key: 'absent', width: 14 },
+    ];
+    const rows = students.map((st) => {
+      const s = byStudent.get(st.id);
+      return {
+        no: st.studentNo ?? '',
+        name: st.name,
+        score: s && !s.isAbsent ? (num(s.score) ?? '') : '',
+        absent: s?.isAbsent ? '是' : '',
+      };
+    });
+
+    const buffer = await buildTemplateWorkbook(
+      '成绩导入模板',
+      `${exam.name} · 成绩导入模板`,
+      columns,
+      rows,
+    );
+
+    const filename = `${exam.name}-成绩模板.xlsx`;
+    return reply
+      .header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      .header('Content-Disposition', xlsxAttachment(filename))
+      .send(buffer);
+  });
+
+  // Parses an uploaded filled-in template and returns matched score updates;
+  // the client merges these into its in-memory grid — nothing is persisted
+  // here, so the teacher still reviews and clicks "保存成绩" (PUT above).
+  app.post('/exams/:examId/scores/import-file', async (req) => {
+    const userId = requireUser(req);
+    const { examId } = z.object({ examId: z.string().uuid() }).parse(req.params);
+    const exam = await requireExam(examId, userId);
+    const fullScore = num(exam.fullScore) ?? 100;
+
+    const students = await prisma.student.findMany({
+      where: { classId: exam.classId, deletedAt: null, status: 'active' },
+      select: { id: true, name: true, studentNo: true },
+    });
+    const byNo = new Map(students.filter((s) => s.studentNo).map((s) => [s.studentNo as string, s]));
+    const byName = new Map(students.map((s) => [s.name, s]));
+
+    const file = await requireUploadedFile(req);
+    const rows = await readTemplateRows(file);
+    if (!rows.length) throw ApiError.validation('模板文件为空');
+
+    const matched: { studentId: string; score: number | null; isAbsent: boolean }[] = [];
+    const skipped: string[] = [];
+
+    for (const [no, name, scoreText, absentText] of rows) {
+      const student = (no && byNo.get(no)) || (name && byName.get(name));
+      if (!student) {
+        if (no || name) skipped.push(name || no);
+        continue;
+      }
+
+      const absent = ['是', 'y', 'yes', 'true', '1'].includes((absentText ?? '').trim().toLowerCase());
+      const trimmed = (scoreText ?? '').trim();
+      if (absent || trimmed === '' || trimmed === '缺考') {
+        matched.push({ studentId: student.id, score: null, isAbsent: true });
+        continue;
+      }
+
+      const n = Number(trimmed);
+      if (Number.isNaN(n)) {
+        skipped.push(student.name);
+        continue;
+      }
+      if (n > fullScore) {
+        throw ApiError.validation('分数超出满分', [
+          { field: student.name, message: `分数 ${n} 超过满分 ${fullScore}` },
+        ]);
+      }
+      matched.push({ studentId: student.id, score: n, isAbsent: false });
+    }
+
+    if (!matched.length) {
+      throw ApiError.validation('未匹配到任何学生，请确认使用的是本考试导出的模板');
+    }
+
+    return { data: { matched: matched.length, skipped, scores: matched } };
   });
 
   app.put('/exams/:examId/scores', async (req) => {

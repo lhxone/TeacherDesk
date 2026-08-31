@@ -191,6 +191,46 @@ export async function fetchAllPages<T>(
   return out;
 }
 
+/**
+ * Upload a single file as multipart/form-data (Excel template imports).
+ * Bypasses `request()`'s JSON body handling since fetch must set its own
+ * multipart boundary in the Content-Type header.
+ */
+async function uploadFile<T = unknown>(
+  path: string,
+  file: File,
+  query?: RequestOptions['query'],
+): Promise<T> {
+  const url = new URL(`${BASE}${path}`, window.location.origin);
+  for (const [k, v] of Object.entries(query ?? {})) {
+    if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
+  }
+
+  const form = new FormData();
+  form.append('file', file);
+
+  const headers: Record<string, string> = {};
+  const token = tokenStore.access;
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let res: Response;
+  try {
+    res = await fetch(url.toString(), { method: 'POST', headers, body: form });
+  } catch {
+    throw new ApiError(0, 'NETWORK_ERROR', '网络连接失败，请检查网络后重试');
+  }
+
+  const text = await res.text();
+  const body = text ? JSON.parse(text) : {};
+
+  if (!res.ok) {
+    const err = body.error ?? {};
+    throw new ApiError(res.status, err.code ?? 'INTERNAL_ERROR', err.message ?? '请求失败', err.details);
+  }
+
+  return body as T;
+}
+
 export const api = {
   get: <T>(path: string, query?: RequestOptions['query']) => request<T>(path, { query }),
   post: <T>(path: string, body?: unknown) => request<T>(path, { method: 'POST', body }),
@@ -199,4 +239,5 @@ export const api = {
   del: <T>(path: string, body?: unknown) => request<T>(path, { method: 'DELETE', body }),
   blob: (path: string, query?: RequestOptions['query']) =>
     request<Blob>(path, { query, raw: true }),
+  upload: uploadFile,
 };

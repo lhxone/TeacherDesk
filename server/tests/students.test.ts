@@ -1,14 +1,27 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
+import ExcelJS from 'exceljs';
 import {
   createClass,
   createStudents,
   createTestApp,
+  multipartFile,
   prisma,
   registerUser,
   resetDb,
   type TestUser,
 } from './helpers.js';
+
+/** Build a minimal .xlsx buffer with a title row, header row, then data rows — matching
+ * the shape buildTemplateWorkbook produces, which readTemplateRows skips the first two of. */
+async function buildXlsx(headers: string[], rows: (string | number)[][]): Promise<Buffer> {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('sheet1');
+  sheet.addRow(['title']);
+  sheet.addRow(headers);
+  for (const r of rows) sheet.addRow(r);
+  return Buffer.from(await workbook.xlsx.writeBuffer());
+}
 
 let app: FastifyInstance;
 let user: TestUser;
@@ -273,6 +286,87 @@ describe('students: bulk import', () => {
       url: `/api/v1/classes/${classId}/students/bulk-import`,
       headers: user.auth,
       payload: { dryRun: true, students: [] },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
+describe('students: Excel template import', () => {
+  it('downloads a blank .xlsx template with the expected headers', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/classes/${classId}/students/import-template`,
+      headers: user.auth,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toContain('spreadsheetml');
+
+    const workbook = new ExcelJS.Workbook();
+    // exceljs's Buffer type predates @types/node's generic Buffer<T>; the
+    // runtime value is a plain Buffer either way (see server/src/lib/excel.ts).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await workbook.xlsx.load(res.rawPayload as any);
+    const values = workbook.worksheets[0]
+      .getSheetValues()
+      .flat()
+      .filter((v): v is string => typeof v === 'string');
+    expect(values).toContain('学号');
+    expect(values).toContain('姓名');
+  });
+
+  it('previews an uploaded .xlsx without writing on a dry run', async () => {
+    await createStudents(app, user, classId, [{ name: '已存在', studentNo: '01' }]);
+    const buffer = await buildXlsx(
+      ['学号', '姓名', '性别', '电话'],
+      [
+        ['02', '张三', '男', ''],
+        ['01', '李四', '女', ''],
+      ],
+    );
+    const { headers, payload } = multipartFile(buffer, 'roster.xlsx');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/classes/${classId}/students/import-file`,
+      headers: { ...user.auth, ...headers },
+      payload,
+    });
+
+    expect(res.statusCode).toBe(200);
+    const data = res.json().data;
+    expect(data.dryRun).toBe(true);
+    expect(data.valid).toBe(1);
+    expect(data.invalid).toBe(1);
+    expect(data.rows[1].errors[0]).toContain('已存在');
+    expect(await prisma.student.count({ where: { classId } })).toBe(1);
+  });
+
+  it('writes valid rows when dryRun=false', async () => {
+    const buffer = await buildXlsx(
+      ['学号', '姓名', '性别', '电话'],
+      [['01', '张三', '', ''], ['02', '李四', '', '']],
+    );
+    const { headers, payload } = multipartFile(buffer, 'roster.xlsx');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/classes/${classId}/students/import-file?dryRun=false`,
+      headers: { ...user.auth, ...headers },
+      payload,
+    });
+
+    expect(res.json().data.created).toBe(2);
+    expect(await prisma.student.count({ where: { classId, deletedAt: null } })).toBe(2);
+  });
+
+  it('rejects a non-.xlsx upload', async () => {
+    const { headers, payload } = multipartFile(Buffer.from('name\n张三'), 'roster.csv', 'text/csv');
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/classes/${classId}/students/import-file`,
+      headers: { ...user.auth, ...headers },
+      payload,
     });
     expect(res.statusCode).toBe(400);
   });

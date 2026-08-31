@@ -28,6 +28,8 @@ export type UserSettings = {
   gradeThresholds: { excellent: number; good: number; pass: number };
   pushRemindersEnabled: boolean;
   remindBeforeMinutes: number;
+  /** IANA time zone (e.g. "Asia/Shanghai") the day schedule / reminders are computed in. */
+  timeZone: string | null;
 };
 
 export type AuthResult = {
