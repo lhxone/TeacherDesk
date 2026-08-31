@@ -2,8 +2,27 @@ import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import { VitePWA } from 'vite-plugin-pwa';
 import path from 'node:path';
+import { execSync } from 'node:child_process';
+
+// The Docker build context is just web/ (no .git — see the Dockerfile), so
+// `git rev-parse` inside that build would always fail. CI passes the hash it
+// already knows in as a build arg -> env var instead (see Dockerfile,
+// container.yml); fall back to asking git directly for local dev builds.
+function resolveCommitHash(): string {
+  if (process.env.GIT_COMMIT_HASH) return process.env.GIT_COMMIT_HASH.slice(0, 7);
+  try {
+    return execSync('git rev-parse --short HEAD', { cwd: __dirname }).toString().trim();
+  } catch {
+    return 'unknown';
+  }
+}
 
 export default defineConfig({
+  // Baked in at build time so "我的" can show exactly which build is
+  // running, without an API round-trip.
+  define: {
+    __APP_COMMIT__: JSON.stringify(resolveCommitHash()),
+  },
   plugins: [
     vue(),
     VitePWA({

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { onBeforeUnmount, onMounted, ref, useTemplateRef } from 'vue';
 import { useRouter } from 'vue-router';
+import Sortable from 'sortablejs';
 import { useAuthStore } from '@/stores/auth';
 import { ApiError } from '@/api/client';
 import { useTheme, type ThemeMode } from '@/composables/useTheme';
@@ -21,6 +22,11 @@ const themeOptions: { value: ThemeMode; label: string }[] = [
   { value: 'dark', label: '深色' },
   { value: 'system', label: '跟随系统' },
 ];
+
+// Short git commit hash of this build, baked in by vite.config.ts — lets a
+// teacher (or us, reading a bug report) confirm which build is actually
+// running without an API round-trip.
+const appCommit = __APP_COMMIT__;
 
 import type { DayScheduleItem } from '@/api/types';
 
@@ -70,12 +76,40 @@ function removeRow(i: number) {
   daySchedule.value.splice(i, 1);
 }
 
-function moveRow(i: number, delta: number) {
-  const j = i + delta;
-  if (j < 0 || j >= daySchedule.value.length) return;
-  const [row] = daySchedule.value.splice(i, 1);
-  daySchedule.value.splice(j, 0, row);
-}
+// Drag-to-reorder (touch + mouse) via SortableJS, scoped to the ".ds-handle"
+// grip so dragging never fights with the label input or time pickers inside
+// each row. Sortable moves the DOM node itself; oldIndex/newIndex tell us how
+// to replay that as an array splice so Vue's reactive state stays the source
+// of truth (and a re-render always matches what's on screen).
+const dsListEl = useTemplateRef<HTMLElement>('dsListEl');
+let sortable: Sortable | null = null;
+
+onMounted(() => {
+  if (!dsListEl.value) return;
+  sortable = Sortable.create(dsListEl.value, {
+    handle: '.ds-handle',
+    animation: 150,
+    ghostClass: 'ds-row-ghost',
+    // The native HTML5 DnD backend behaves inconsistently across mobile
+    // WebViews and doesn't fire from synthetic events at all; the mouse/touch
+    // fallback is what SortableJS itself recommends for touch reliability.
+    forceFallback: true,
+    // Let Sortable move the real DOM nodes during the drag — don't fight it
+    // by also re-rendering through Vue mid-drag. Only sync `daySchedule` on
+    // drop, once, so Vue's next render is a no-op (DOM order already matches
+    // the new array order) instead of a second conflicting reorder.
+    onEnd(evt) {
+      const { oldIndex, newIndex } = evt;
+      if (oldIndex == null || newIndex == null || oldIndex === newIndex) return;
+      const [row] = daySchedule.value.splice(oldIndex, 1);
+      daySchedule.value.splice(newIndex, 0, row);
+    },
+  });
+});
+
+onBeforeUnmount(() => {
+  sortable?.destroy();
+});
 
 function resetDaySchedule() {
   daySchedule.value = JSON.parse(JSON.stringify(DEFAULT_DAY_SCHEDULE));
@@ -345,24 +379,18 @@ async function logout() {
           「活动」行是眼操、午餐、午休、大课间等固定事件。
         </p>
 
-        <div class="ds-list">
+        <p class="hint ds-drag-hint">按住 ⠿ 拖动可调整顺序</p>
+
+        <div ref="dsListEl" class="ds-list">
           <div v-for="(row, i) in daySchedule" :key="row.key" class="ds-row">
             <div class="ds-row-top">
+              <span class="ds-handle" title="拖动排序">⠿</span>
               <select v-model="row.kind" class="select ds-kind">
                 <option value="lesson">课程</option>
                 <option value="activity">活动</option>
               </select>
               <input v-model="row.label" class="input ds-label" maxlength="24" placeholder="名称" />
-              <div class="ds-reorder">
-                <button class="btn btn-sm ds-icon-btn" title="上移" :disabled="i === 0" @click="moveRow(i, -1)">↑</button>
-                <button
-                  class="btn btn-sm ds-icon-btn"
-                  title="下移"
-                  :disabled="i === daySchedule.length - 1"
-                  @click="moveRow(i, 1)"
-                >↓</button>
-                <button class="btn btn-sm btn-danger ds-icon-btn" title="删除" @click="removeRow(i)">×</button>
-              </div>
+              <button class="btn btn-sm btn-danger ds-icon-btn" title="删除" @click="removeRow(i)">×</button>
             </div>
             <div class="ds-row-bottom">
               <input v-model="row.start" class="input ds-time" type="time" />
@@ -494,6 +522,8 @@ async function logout() {
       <section class="card">
         <button class="btn btn-danger btn-block" @click="logout">退出登录</button>
       </section>
+
+      <p class="build-version">版本 {{ appCommit }}</p>
     </div>
   </div>
 </template>
@@ -501,6 +531,13 @@ async function logout() {
 <style scoped>
 .narrow { max-width: 520px; }
 .check { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+
+.build-version {
+  margin: 4px 0 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-faint);
+}
 
 .theme-switch { display: flex; gap: 8px; flex-wrap: wrap; }
 .theme-option {
@@ -538,8 +575,26 @@ async function logout() {
 .ds-kind { width: 76px; flex-shrink: 0; }
 .ds-time { flex: 1; min-width: 0; }
 .ds-dash { color: var(--text-faint); flex-shrink: 0; }
-.ds-reorder { display: flex; gap: 4px; flex-shrink: 0; }
-.ds-icon-btn { padding: 5px 9px; min-width: 32px; }
+.ds-icon-btn { padding: 5px 9px; min-width: 32px; flex-shrink: 0; }
+
+.ds-drag-hint { margin: 6px 0 0; }
+
+/* touch-action: none stops the browser from treating a vertical finger drag
+   here as a page scroll, so SortableJS's own touch handling gets the
+   gesture instead — without it, dragging on mobile just scrolls the page. */
+.ds-handle {
+  flex-shrink: 0;
+  padding: 4px 6px;
+  color: var(--text-faint);
+  font-size: 16px;
+  line-height: 1;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.ds-handle:active { cursor: grabbing; }
+
+.ds-row-ghost { opacity: 0.4; }
 
 @media (max-width: 420px) {
   .ds-kind { width: 68px; }

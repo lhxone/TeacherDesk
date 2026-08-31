@@ -9,7 +9,11 @@
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#3B82F6" />
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f172a" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <!-- "black-translucent" makes iOS draw page content underneath the status
+         bar and dim/blur it for legibility — that's the "顶部被模糊" effect.
+         "default" keeps an opaque status bar so our own header sits below it
+         instead, matching the design in styles.css / App.vue. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>教师工作台</title>
   </head>
