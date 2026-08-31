@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
+import ExcelJS from 'exceljs';
 import {
   createClass,
   createStudents,
@@ -418,7 +419,7 @@ describe('exports', () => {
     expect(res.body).toContain('缺考');
   });
 
-  it('exports the student roster', async () => {
+  it('exports the student roster as a styled workbook', async () => {
     const res = await app.inject({
       method: 'GET',
       url: `/api/v1/exports/class/${classId}/students`,
@@ -426,7 +427,18 @@ describe('exports', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.body).toContain('学号');
-    expect(res.body).toContain('张三');
+    expect(res.headers['content-type']).toContain('spreadsheetml');
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(res.rawPayload);
+    const sheet = workbook.getWorksheet('学生名册');
+    expect(sheet).toBeTruthy();
+
+    const values = sheet!
+      .getSheetValues()
+      .flat()
+      .filter((v): v is string => typeof v === 'string');
+    expect(values).toContain('学号');
+    expect(values).toContain('张三');
   });
 });

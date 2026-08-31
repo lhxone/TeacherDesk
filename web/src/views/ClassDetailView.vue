@@ -21,7 +21,17 @@ const error = ref('');
 // --- student form ---
 const showStudentForm = ref(false);
 const editingStudent = ref<Student | null>(null);
-const studentForm = ref({ name: '', studentNo: '', gender: '' as string, phone: '', note: '' });
+const studentForm = ref({
+  name: '',
+  studentNo: '',
+  gender: '' as string,
+  phone: '',
+  qq: '',
+  note: '',
+  tagIds: [] as string[],
+});
+const newTagName = ref('');
+const creatingTag = ref(false);
 
 // --- bulk import ---
 const showImport = ref(false);
@@ -38,6 +48,7 @@ type ImportRow = {
 
 // --- exam form ---
 const showExamForm = ref(false);
+const editingExam = ref<Exam | null>(null);
 const examForm = ref({
   name: '',
   subject: '',
@@ -76,7 +87,7 @@ async function loadTags() {
 
 function openStudentCreate() {
   editingStudent.value = null;
-  studentForm.value = { name: '', studentNo: '', gender: '', phone: '', note: '' };
+  studentForm.value = { name: '', studentNo: '', gender: '', phone: '', qq: '', note: '', tagIds: [] };
   error.value = '';
   showStudentForm.value = true;
 }
@@ -88,10 +99,35 @@ function openStudentEdit(s: Student) {
     studentNo: s.studentNo ?? '',
     gender: s.gender ?? '',
     phone: s.phone ?? '',
+    qq: s.qq ?? '',
     note: s.note ?? '',
+    tagIds: s.tags.map((t) => t.id),
   };
   error.value = '';
   showStudentForm.value = true;
+}
+
+function toggleStudentTag(tagId: string) {
+  const i = studentForm.value.tagIds.indexOf(tagId);
+  if (i === -1) studentForm.value.tagIds.push(tagId);
+  else studentForm.value.tagIds.splice(i, 1);
+}
+
+/** Create a tag inline from the student form and select it immediately. */
+async function createTag() {
+  const name = newTagName.value.trim();
+  if (!name) return;
+  creatingTag.value = true;
+  try {
+    const res = await api.post<Envelope<Tag>>('/tags', { name });
+    tags.value.push(res.data);
+    studentForm.value.tagIds.push(res.data.id);
+    newTagName.value = '';
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.message : '创建标签失败';
+  } finally {
+    creatingTag.value = false;
+  }
 }
 
 async function saveStudent() {
@@ -102,7 +138,9 @@ async function saveStudent() {
       studentNo: studentForm.value.studentNo.trim() || null,
       gender: studentForm.value.gender || null,
       phone: studentForm.value.phone.trim() || null,
+      qq: studentForm.value.qq.trim() || null,
       note: studentForm.value.note.trim() || null,
+      tagIds: studentForm.value.tagIds,
     };
 
     if (editingStudent.value) {
@@ -174,13 +212,44 @@ async function confirmImport() {
   }
 }
 
+function openExamCreate() {
+  editingExam.value = null;
+  examForm.value = {
+    name: '',
+    subject: '',
+    examType: 'unit',
+    examDate: new Date().toISOString().slice(0, 10),
+    fullScore: 100,
+  };
+  error.value = '';
+  showExamForm.value = true;
+}
+
+function openExamEdit(e: Exam) {
+  editingExam.value = e;
+  examForm.value = {
+    name: e.name,
+    subject: e.subject ?? '',
+    examType: e.examType,
+    examDate: e.examDate,
+    fullScore: e.fullScore,
+  };
+  error.value = '';
+  showExamForm.value = true;
+}
+
 async function saveExam() {
   error.value = '';
   try {
-    await api.post(`/classes/${props.classId}/exams`, {
+    const payload = {
       ...examForm.value,
       subject: examForm.value.subject.trim() || cls.value?.subject || null,
-    });
+    };
+    if (editingExam.value) {
+      await api.patch(`/exams/${editingExam.value.id}`, payload);
+    } else {
+      await api.post(`/classes/${props.classId}/exams`, payload);
+    }
     showExamForm.value = false;
     await loadExams();
   } catch (e) {
@@ -196,14 +265,16 @@ async function removeExam(e: Exam) {
 
 function exportCsv(kind: 'scores' | 'students') {
   // The endpoint needs the bearer token, so fetch as a blob then save locally
-  // rather than pointing a plain link at it.
+  // rather than pointing a plain link at it. Students export as a styled .xlsx;
+  // scores stay a plain .csv.
+  const ext = kind === 'students' ? 'xlsx' : 'csv';
   api
     .blob(`/exports/class/${props.classId}/${kind}`)
     .then((blob) => {
       const href = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = href;
-      a.download = `${cls.value?.name ?? 'class'}-${kind}.csv`;
+      a.download = `${cls.value?.name ?? 'class'}-${kind}.${ext}`;
       a.click();
       URL.revokeObjectURL(href);
     })
@@ -298,6 +369,7 @@ watch(() => props.classId, loadAll);
                 <th>性别</th>
                 <th>标签</th>
                 <th>联系电话</th>
+                <th>家长QQ</th>
                 <th>操作</th>
               </tr>
             </thead>
@@ -317,6 +389,7 @@ watch(() => props.classId, loadAll);
                   <span v-if="!s.tags.length">—</span>
                 </td>
                 <td>{{ s.phone ?? '—' }}</td>
+                <td>{{ s.qq ?? '—' }}</td>
                 <td>
                   <button class="btn btn-sm" @click="openStudentEdit(s)">编辑</button>
                   <button class="btn btn-sm btn-danger" @click="removeStudent(s)">移除</button>
@@ -332,7 +405,7 @@ watch(() => props.classId, loadAll);
         <div class="row">
           <div class="spacer" />
           <button class="btn" @click="exportCsv('scores')">导出成绩单</button>
-          <button class="btn btn-primary" @click="showExamForm = true">+ 新建考试</button>
+          <button class="btn btn-primary" @click="openExamCreate">+ 新建考试</button>
         </div>
 
         <EmptyState v-if="!exams.length" icon="exam" title="还没有考试记录">
@@ -366,6 +439,7 @@ watch(() => props.classId, loadAll);
                   <RouterLink class="btn btn-sm" :to="{ name: 'score-entry', params: { examId: e.id } }">
                     录入
                   </RouterLink>
+                  <button class="btn btn-sm" @click="openExamEdit(e)">编辑</button>
                   <button class="btn btn-sm btn-danger" @click="removeExam(e)">删除</button>
                 </td>
               </tr>
@@ -425,6 +499,54 @@ watch(() => props.classId, loadAll);
             autocomplete="off"
             maxlength="32"
           />
+        </div>
+        <div class="field">
+          <label for="student-qq">家长QQ</label>
+          <input
+            id="student-qq"
+            v-model="studentForm.qq"
+            class="input"
+            autocomplete="off"
+            maxlength="20"
+          />
+        </div>
+        <div class="field">
+          <label>标签</label>
+          <div class="tag-picker">
+            <button
+              v-for="t in tags"
+              :key="t.id"
+              type="button"
+              class="badge tag-toggle"
+              :class="{ active: studentForm.tagIds.includes(t.id) }"
+              :style="
+                studentForm.tagIds.includes(t.id)
+                  ? { background: t.color, color: '#fff' }
+                  : { background: t.color + '22', color: t.color }
+              "
+              @click="toggleStudentTag(t.id)"
+            >
+              {{ t.name }}
+            </button>
+          </div>
+          <div class="row" style="margin-top: 8px">
+            <input
+              v-model="newTagName"
+              class="input"
+              style="max-width: 160px"
+              placeholder="新建标签"
+              maxlength="32"
+              @keydown.enter.prevent="createTag"
+            />
+            <button
+              type="button"
+              class="btn btn-sm"
+              :disabled="creatingTag || !newTagName.trim()"
+              @click="createTag"
+            >
+              添加
+            </button>
+          </div>
         </div>
         <div class="field">
           <label>备注</label>
@@ -497,7 +619,11 @@ watch(() => props.classId, loadAll);
     </ModalDialog>
 
     <!-- Exam dialog -->
-    <ModalDialog v-if="showExamForm" title="新建考试" @close="showExamForm = false">
+    <ModalDialog
+      v-if="showExamForm"
+      :title="editingExam ? '编辑考试' : '新建考试'"
+      @close="showExamForm = false"
+    >
       <form class="stack" @submit.prevent="saveExam">
         <div class="field">
           <label>考试名称</label>
@@ -528,7 +654,7 @@ watch(() => props.classId, loadAll);
       </form>
       <template #footer>
         <button class="btn" @click="showExamForm = false">取消</button>
-        <button class="btn btn-primary" @click="saveExam">创建</button>
+        <button class="btn btn-primary" @click="saveExam">{{ editingExam ? '保存' : '创建' }}</button>
       </template>
     </ModalDialog>
   </div>
@@ -554,4 +680,7 @@ watch(() => props.classId, loadAll);
 td .btn + .btn { margin-left: 6px; }
 tr.bad { background: #fef2f2; }
 .badge + .badge { margin-left: 4px; }
+
+.tag-picker { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag-toggle { border: none; cursor: pointer; font: inherit; }
 </style>

@@ -121,6 +121,7 @@ model Student {
   gender    String?   @db.VarChar(8)
   avatarUrl String?   @map("avatar_url") @db.VarChar(512)
   phone     String?   @db.VarChar(32)
+  qq        String?   @db.VarChar(20)
   note      String?
   sortOrder Int       @default(0) @map("sort_order")
   status    String    @default("active") @db.VarChar(16)

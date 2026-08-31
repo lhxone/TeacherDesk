@@ -61,6 +61,7 @@ export type Student = {
   gender: 'male' | 'female' | 'other' | null;
   avatarUrl: string | null;
   phone: string | null;
+  qq: string | null;
   note: string | null;
   sortOrder: number;
   status: 'active' | 'inactive';

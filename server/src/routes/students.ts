@@ -15,6 +15,7 @@ const createSchema = z.object({
   gender: genderEnum.nullable().optional(),
   avatarUrl: z.string().max(512).nullable().optional(),
   phone: z.string().max(32).nullable().optional(),
+  qq: z.string().max(20).nullable().optional(),
   note: z.string().nullable().optional(),
   sortOrder: z.number().int().optional(),
   tagIds: z.array(z.string().uuid()).optional(),
@@ -28,6 +29,7 @@ type StudentRow = {
   gender: string | null;
   avatarUrl: string | null;
   phone: string | null;
+  qq: string | null;
   note: string | null;
   sortOrder: number;
   status: string;
@@ -43,6 +45,7 @@ function serializeStudent(s: StudentRow) {
     gender: s.gender,
     avatarUrl: s.avatarUrl,
     phone: s.phone,
+    qq: s.qq,
     note: s.note,
     sortOrder: s.sortOrder,
     status: s.status,
@@ -147,6 +150,7 @@ export async function registerStudentRoutes(app: FastifyInstance) {
         gender: body.gender ?? null,
         avatarUrl: body.avatarUrl ?? null,
         phone: body.phone ?? null,
+        qq: body.qq ?? null,
         note: body.note ?? null,
         sortOrder: body.sortOrder ?? 0,
         studentTags: body.tagIds?.length
@@ -383,6 +387,7 @@ export async function registerStudentRoutes(app: FastifyInstance) {
         gender: body.gender,
         avatarUrl: body.avatarUrl,
         phone: body.phone,
+        qq: body.qq,
         note: body.note,
         sortOrder: body.sortOrder,
         status: body.status,

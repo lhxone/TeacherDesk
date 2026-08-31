@@ -76,6 +76,9 @@ onMounted(async () => {
             <dt>家长联系电话</dt>
             <dd>{{ student.phone ?? '—' }}</dd>
 
+            <dt>家长QQ</dt>
+            <dd>{{ student.qq ?? '—' }}</dd>
+
             <dt>当前座位</dt>
             <dd>
               <template v-if="student.currentSeat">
