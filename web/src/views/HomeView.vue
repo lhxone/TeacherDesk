@@ -43,6 +43,16 @@ const greeting = computed(() => {
 
 const pendingEvents = computed(() => agenda.value?.events.filter((e) => !e.isDone) ?? []);
 
+function formatEventTime(e: EventItem): string {
+  if (e.allDay) return '全天';
+  const start = new Date(e.startAt);
+  const startLabel = start.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  if (!e.endAt) return startLabel;
+  const end = new Date(e.endAt);
+  const endLabel = end.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  return `${startLabel}–${endLabel}`;
+}
+
 // Home timeline: activities plus only the lessons that actually have a class
 // scheduled — empty periods ("空堂") are noise on the dashboard. The full
 // timeline (every period) lives on the schedule day view.
@@ -138,9 +148,10 @@ onMounted(async () => {
               :checked="e.isDone"
               @change="toggleEvent(e.id, ($event.target as HTMLInputElement).checked)"
             />
-            <span class="todo-title" :class="{ done: e.isDone }" @click="openEditEvent(e)">
-              {{ e.title }}
-            </span>
+            <div class="todo-main" @click="openEditEvent(e)">
+              <span class="todo-title" :class="{ done: e.isDone }">{{ e.title }}</span>
+              <span class="todo-time hint">{{ formatEventTime(e) }}</span>
+            </div>
             <span v-if="e.className" class="badge">{{ e.className }}</span>
             <div class="spacer" />
             <button class="btn btn-sm" @click="openEditEvent(e)">编辑</button>
@@ -210,8 +221,17 @@ onMounted(async () => {
   padding: 8px 4px;
 }
 
-.todo-title { cursor: pointer; }
-.todo-title:hover { color: var(--brand); }
+.todo-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  cursor: pointer;
+}
+.todo-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.todo-main:hover .todo-title { color: var(--brand); }
+.todo-time { flex-shrink: 0; font-size: 12px; }
 .todo .done { color: var(--text-faint); text-decoration: line-through; }
 
 .class-card { position: relative; color: inherit; overflow: hidden; }

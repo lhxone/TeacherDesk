@@ -5,7 +5,12 @@ import App from './App.vue';
 import { router } from './router';
 import { purgeApiCaches, setAuthFailureHandler } from './api/client';
 import { syncPushSubscription } from './api/push';
+import { useTheme } from './composables/useTheme';
 import './styles.css';
+
+// Applies the stored/system theme to <html data-theme> immediately (the
+// composable's watchEffect runs on import), before first paint.
+useTheme();
 
 // Keep the service worker current (autoUpdate). Once it is active, refresh the
 // push subscription so reminders keep reaching this device.
