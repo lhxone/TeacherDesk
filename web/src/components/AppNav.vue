@@ -1,17 +1,18 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
+import NavIcons from '@/components/icons/NavIcons.vue';
 
 const auth = useAuthStore();
 const router = useRouter();
 
 // Mobile bottom tabs mirror PRD §3.8: 首页 / 班级 / 课堂工具 / 成绩 / 我的
 const links = [
-  { name: 'home', label: '首页', icon: '🏠' },
-  { name: 'classes', label: '班级', icon: '👥' },
-  { name: 'schedule', label: '日程', icon: '📅' },
-  { name: 'tools', label: '课堂', icon: '🎲' },
-  { name: 'settings', label: '我的', icon: '⚙️' },
+  { name: 'home', label: '首页', icon: 'home' as const },
+  { name: 'classes', label: '班级', icon: 'classes' as const },
+  { name: 'schedule', label: '日程', icon: 'schedule' as const },
+  { name: 'tools', label: '课堂', icon: 'tools' as const },
+  { name: 'settings', label: '我的', icon: 'settings' as const },
 ];
 
 async function logout() {
@@ -24,7 +25,7 @@ async function logout() {
   <!-- Desktop: left sidebar -->
   <aside class="sidebar hide-mobile">
     <div class="brand">
-      <span class="brand-mark">🎓</span>
+      <span class="brand-mark"><NavIcons name="logo" /></span>
       <span class="brand-name">教师工作台</span>
     </div>
 
@@ -36,7 +37,7 @@ async function logout() {
         class="side-link"
         active-class="active"
       >
-        <span class="icon">{{ l.icon }}</span>
+        <span class="icon"><NavIcons :name="l.icon" /></span>
         <span>{{ l.label }}</span>
       </RouterLink>
     </nav>
@@ -56,7 +57,7 @@ async function logout() {
       class="tab"
       active-class="active"
     >
-      <span class="tab-icon">{{ l.icon }}</span>
+      <span class="tab-icon"><NavIcons :name="l.icon" /></span>
       <span class="tab-label">{{ l.label }}</span>
     </RouterLink>
   </nav>
@@ -84,7 +85,8 @@ async function logout() {
   font-size: 16px;
 }
 
-.brand-mark { font-size: 22px; }
+.brand-mark { display: inline-flex; color: var(--brand); }
+.brand-mark svg { width: 22px; height: 22px; }
 
 .side-links { display: flex; flex-direction: column; gap: 2px; flex: 1; }
 
@@ -99,8 +101,11 @@ async function logout() {
   transition: background 0.15s, color 0.15s;
 }
 
-.side-link:hover { background: #f1f5f9; color: var(--text); }
+.side-link:hover { background: var(--hover-tint); color: var(--text); }
 .side-link.active { background: var(--brand-soft); color: var(--brand-dark); }
+
+.side-link .icon { display: inline-flex; }
+.side-link .icon svg { width: 18px; height: 18px; }
 
 .side-footer {
   border-top: 1px solid var(--border);
@@ -147,5 +152,6 @@ async function logout() {
 }
 
 .tab.active { color: var(--brand); }
-.tab-icon { font-size: 19px; line-height: 1; }
+.tab-icon { display: inline-flex; line-height: 1; }
+.tab-icon svg { width: 21px; height: 21px; }
 </style>

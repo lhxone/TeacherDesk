@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { ApiError } from '@/api/client';
+import { useTheme, type ThemeMode } from '@/composables/useTheme';
 import {
   disablePush,
   enablePush,
@@ -13,6 +14,13 @@ import {
 
 const auth = useAuthStore();
 const router = useRouter();
+const { mode: themeMode, setMode: setThemeMode } = useTheme();
+
+const themeOptions: { value: ThemeMode; label: string }[] = [
+  { value: 'light', label: '浅色' },
+  { value: 'dark', label: '深色' },
+  { value: 'system', label: '跟随系统' },
+];
 
 import type { DayScheduleItem } from '@/api/types';
 
@@ -300,6 +308,22 @@ async function logout() {
       </section>
 
       <section class="card">
+        <div class="card-title">外观</div>
+        <div class="theme-switch">
+          <button
+            v-for="opt in themeOptions"
+            :key="opt.value"
+            type="button"
+            class="theme-option"
+            :class="{ active: themeMode === opt.value }"
+            @click="setThemeMode(opt.value)"
+          >
+            {{ opt.label }}
+          </button>
+        </div>
+      </section>
+
+      <section class="card">
         <div class="card-title">课表偏好</div>
         <div class="stack">
           <div class="field">
@@ -323,17 +347,28 @@ async function logout() {
 
         <div class="ds-list">
           <div v-for="(row, i) in daySchedule" :key="row.key" class="ds-row">
-            <input v-model="row.label" class="input ds-label" maxlength="24" />
-            <select v-model="row.kind" class="select ds-kind">
-              <option value="lesson">课程</option>
-              <option value="activity">活动</option>
-            </select>
-            <input v-model="row.start" class="input ds-time" type="time" />
-            <span class="ds-dash">–</span>
-            <input v-model="row.end" class="input ds-time" type="time" />
-            <button class="btn btn-sm" title="上移" @click="moveRow(i, -1)">↑</button>
-            <button class="btn btn-sm" title="下移" @click="moveRow(i, 1)">↓</button>
-            <button class="btn btn-sm btn-danger" title="删除" @click="removeRow(i)">×</button>
+            <div class="ds-row-top">
+              <select v-model="row.kind" class="select ds-kind">
+                <option value="lesson">课程</option>
+                <option value="activity">活动</option>
+              </select>
+              <input v-model="row.label" class="input ds-label" maxlength="24" placeholder="名称" />
+              <div class="ds-reorder">
+                <button class="btn btn-sm ds-icon-btn" title="上移" :disabled="i === 0" @click="moveRow(i, -1)">↑</button>
+                <button
+                  class="btn btn-sm ds-icon-btn"
+                  title="下移"
+                  :disabled="i === daySchedule.length - 1"
+                  @click="moveRow(i, 1)"
+                >↓</button>
+                <button class="btn btn-sm btn-danger ds-icon-btn" title="删除" @click="removeRow(i)">×</button>
+              </div>
+            </div>
+            <div class="ds-row-bottom">
+              <input v-model="row.start" class="input ds-time" type="time" />
+              <span class="ds-dash">–</span>
+              <input v-model="row.end" class="input ds-time" type="time" />
+            </div>
           </div>
         </div>
 
@@ -467,14 +502,46 @@ async function logout() {
 .narrow { max-width: 520px; }
 .check { display: flex; align-items: center; gap: 8px; font-size: 14px; }
 
-.ds-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
-.ds-row { display: flex; align-items: center; gap: 6px; }
-.ds-label { flex: 1; min-width: 80px; }
-.ds-kind { width: 76px; }
-.ds-time { width: 104px; }
-.ds-dash { color: var(--text-faint); }
-@media (max-width: 560px) {
-  .ds-row { flex-wrap: wrap; }
-  .ds-label { flex-basis: 100%; }
+.theme-switch { display: flex; gap: 8px; flex-wrap: wrap; }
+.theme-option {
+  flex: 1;
+  min-width: 96px;
+  padding: 9px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.theme-option:hover { background: var(--hover-tint); }
+.theme-option.active {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+
+.ds-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.ds-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.ds-row-top { display: flex; align-items: center; gap: 6px; }
+.ds-row-bottom { display: flex; align-items: center; gap: 6px; }
+.ds-label { flex: 1; min-width: 0; }
+.ds-kind { width: 76px; flex-shrink: 0; }
+.ds-time { flex: 1; min-width: 0; }
+.ds-dash { color: var(--text-faint); flex-shrink: 0; }
+.ds-reorder { display: flex; gap: 4px; flex-shrink: 0; }
+.ds-icon-btn { padding: 5px 9px; min-width: 32px; }
+
+@media (max-width: 420px) {
+  .ds-kind { width: 68px; }
 }
 </style>
