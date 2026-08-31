@@ -47,8 +47,7 @@ jobs:
           cache-dependency-path: server/package-lock.json
       - run: npm ci
       - run: npx prisma generate
-      - run: npx prisma db push
-      - run: npx prisma db execute --file prisma/partial-indexes.sql --schema prisma/schema.prisma
+      - run: npx prisma migrate deploy
       - run: npm test
       - run: npm run build
 

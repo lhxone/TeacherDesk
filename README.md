@@ -46,7 +46,7 @@ TeacherDesk/
 │   │   └── main.ts         入口
 │   ├── prisma/
 │   │   ├── schema.prisma   数据模型
-│   │   ├── partial-indexes.sql
+│   │   ├── migrations/     版本化的 schema 迁移历史
 │   │   └── seed.ts         演示数据
 │   └── tests/              179 个测试用例
 ├── web/                    前端 SPA + PWA
@@ -78,8 +78,7 @@ docker exec teacherdesk-pg psql -U teacherdesk -d teacherdesk \
 
 # 2. 后端
 cd server && npm install
-npx prisma db push
-npx prisma db execute --file prisma/partial-indexes.sql --schema prisma/schema.prisma
+npx prisma migrate deploy
 npm run seed
 npm run dev
 
@@ -88,6 +87,19 @@ cd web && npm install && npm run dev
 ```
 
 访问 <http://localhost:5173> ，演示账号 `demo@teacherdesk.app` / `Demo12345`。
+
+### 修改数据模型
+
+改 `server/prisma/schema.prisma` 后用迁移文件记录变更，而不是 `db push`：
+
+```bash
+cd server
+npx prisma migrate dev --name <改动描述，如 add_student_qq>
+```
+
+这会在 `prisma/migrations/` 下生成一份带 SQL 的迁移，应用到本地开发库并提交到仓库。
+CI 与生产环境（`docker-compose.yml` 里的 `migrate` 服务）统一用
+`prisma migrate deploy` 按顺序、幂等地应用这些迁移文件。
 
 ---
 
