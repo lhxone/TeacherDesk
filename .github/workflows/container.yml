@@ -111,6 +111,10 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Only web/ reads this (see web/Dockerfile) — harmless no-op arg
+          # for the api build, which ignores unrecognised build args.
+          build-args: |
+            GIT_COMMIT_HASH=${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: type=gha,mode=max,scope=${{ matrix.component }}
           provenance: mode=max

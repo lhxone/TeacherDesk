@@ -5,6 +5,11 @@ FROM node:20-alpine AS build
 
 WORKDIR /app
 
+# The build context has no .git (see container.yml), so the commit hash has
+# to come in from outside — CI passes the commit it already checked out.
+ARG GIT_COMMIT_HASH=unknown
+ENV GIT_COMMIT_HASH=${GIT_COMMIT_HASH}
+
 COPY package.json package-lock.json* ./
 RUN npm ci
 
