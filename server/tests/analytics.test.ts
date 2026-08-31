@@ -5,11 +5,21 @@ import {
   createClass,
   createStudents,
   createTestApp,
+  multipartFile,
   prisma,
   registerUser,
   resetDb,
   type TestUser,
 } from './helpers.js';
+
+async function buildXlsx(headers: string[], rows: (string | number)[][]): Promise<Buffer> {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('sheet1');
+  sheet.addRow(['title']);
+  sheet.addRow(headers);
+  for (const r of rows) sheet.addRow(r);
+  return Buffer.from(await workbook.xlsx.writeBuffer());
+}
 
 let app: FastifyInstance;
 let user: TestUser;
@@ -145,6 +155,93 @@ describe('scores: entry', () => {
 
     expect(absent.isAbsent).toBe(true);
     expect(absent.score).toBeNull();
+  });
+});
+
+describe('scores: Excel template import', () => {
+  it('downloads a .xlsx template pre-filled with the roster and entered scores', async () => {
+    const examId = await createExam();
+    await putScores(examId, [{ studentId: studentIds[0], score: 88 }]);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/exams/${examId}/scores/template`,
+      headers: user.auth,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toContain('spreadsheetml');
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(res.rawPayload);
+    const values = workbook.worksheets[0]
+      .getSheetValues()
+      .flat()
+      .filter((v) => v !== null && v !== undefined)
+      .map(String);
+    expect(values).toContain('张三');
+    expect(values).toContain('88');
+  });
+
+  it('matches an uploaded .xlsx by student number, falling back to name, without persisting', async () => {
+    const examId = await createExam({ fullScore: 100 });
+    const buffer = await buildXlsx(
+      ['学号', '姓名', '分数', '缺考'],
+      [
+        ['01', '张三', '95', ''],
+        ['', '李四', '', '是'],
+        ['zz', '王五', '', ''], // unknown no, falls back to name match
+      ],
+    );
+    const { headers, payload } = multipartFile(buffer, 'scores.xlsx');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/exams/${examId}/scores/import-file`,
+      headers: { ...user.auth, ...headers },
+      payload,
+    });
+
+    expect(res.statusCode).toBe(200);
+    const data = res.json().data;
+    expect(data.matched).toBe(3);
+    const byId = new Map(data.scores.map((s: { studentId: string }) => [s.studentId, s]));
+    expect(byId.get(studentIds[0])).toMatchObject({ score: 95, isAbsent: false });
+    expect(byId.get(studentIds[1])).toMatchObject({ score: null, isAbsent: true });
+    // An empty score cell with no explicit 缺考 mark is still treated as
+    // absent (matches the pre-Excel CSV import behavior).
+    expect(byId.get(studentIds[2])).toMatchObject({ score: null, isAbsent: true });
+
+    // Nothing written until the client PUTs the merged grid.
+    expect(await prisma.score.count({ where: { examId } })).toBe(0);
+  });
+
+  it('rejects a score above the exam full score', async () => {
+    const examId = await createExam({ fullScore: 100 });
+    const buffer = await buildXlsx(['学号', '姓名', '分数', '缺考'], [['01', '张三', '150', '']]);
+    const { headers, payload } = multipartFile(buffer, 'scores.xlsx');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/exams/${examId}/scores/import-file`,
+      headers: { ...user.auth, ...headers },
+      payload,
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('rejects an upload matching no student', async () => {
+    const examId = await createExam();
+    const buffer = await buildXlsx(['学号', '姓名', '分数', '缺考'], [['99', '未知同学', '80', '']]);
+    const { headers, payload } = multipartFile(buffer, 'scores.xlsx');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/exams/${examId}/scores/import-file`,
+      headers: { ...user.auth, ...headers },
+      payload,
+    });
+    expect(res.statusCode).toBe(400);
   });
 });
 

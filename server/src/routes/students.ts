@@ -6,6 +6,14 @@ import { requireUser } from '../app.js';
 import { requireClass, requireStudent } from '../lib/ownership.js';
 import { paginate, pageMeta } from '../lib/pagination.js';
 import { mean, stddev } from '../lib/stats.js';
+import {
+  buildTemplateWorkbook,
+  xlsxAttachment,
+  readTemplateRows,
+  requireUploadedFile,
+} from '../lib/excel.js';
+
+const GENDER_LABEL_TO_CODE: Record<string, string> = { 男: 'male', 女: 'female', 其他: 'other' };
 
 const genderEnum = z.enum(['male', 'female', 'other']);
 
@@ -163,28 +171,21 @@ export async function registerStudentRoutes(app: FastifyInstance) {
     return reply.status(201).send({ data: serializeStudent(student) });
   });
 
-  app.post('/classes/:classId/students/bulk-import', async (req) => {
-    const userId = requireUser(req);
-    const { classId } = z.object({ classId: z.string().uuid() }).parse(req.params);
-    const body = z
-      .object({
-        dryRun: z.boolean().optional().default(true),
-        students: z
-          .array(
-            z.object({
-              name: z.string().min(1).max(64),
-              studentNo: z.string().max(32).nullable().optional(),
-              gender: genderEnum.nullable().optional(),
-              phone: z.string().max(32).nullable().optional(),
-            }),
-          )
-          .min(1, '至少需要一条学生数据')
-          .max(500, '单次最多导入 500 条'),
-      })
-      .parse(req.body);
+  const importStudentSchema = z.object({
+    name: z.string().min(1).max(64),
+    studentNo: z.string().max(32).nullable().optional(),
+    gender: genderEnum.nullable().optional(),
+    phone: z.string().max(32).nullable().optional(),
+  });
+  type ImportStudent = z.infer<typeof importStudentSchema>;
 
-    await requireClass(classId, userId);
-
+  /**
+   * Shared by the JSON bulk-import endpoint and the Excel-file import: validate
+   * name/studentNo conflicts, and on a non-dry run persist the valid rows.
+   * dryRun previews conflicts without writing (AC-4); on a real run, invalid
+   * rows are skipped and the valid ones still land.
+   */
+  async function runBulkImport(classId: string, students: ImportStudent[], dryRun: boolean) {
     const existing = await prisma.student.findMany({
       where: { classId, deletedAt: null, studentNo: { not: null } },
       select: { studentNo: true },
@@ -192,7 +193,7 @@ export async function registerStudentRoutes(app: FastifyInstance) {
     const taken = new Set(existing.map((e) => e.studentNo as string));
     const seenInBatch = new Set<string>();
 
-    const rows = body.students.map((s, index) => {
+    const rows = students.map((s, index) => {
       const errors: string[] = [];
       const studentNo = s.studentNo?.trim() || null;
 
@@ -210,10 +211,8 @@ export async function registerStudentRoutes(app: FastifyInstance) {
 
     const validRows = rows.filter((r) => r.status === 'ok');
 
-    // dryRun previews conflicts without writing (AC-4). On a real run, invalid
-    // rows are skipped and the valid ones still land.
     let created = 0;
-    if (!body.dryRun && validRows.length) {
+    if (!dryRun && validRows.length) {
       const maxOrder = await prisma.student.aggregate({
         where: { classId, deletedAt: null },
         _max: { sortOrder: true },
@@ -234,15 +233,83 @@ export async function registerStudentRoutes(app: FastifyInstance) {
     }
 
     return {
-      data: {
-        total: rows.length,
-        valid: validRows.length,
-        invalid: rows.length - validRows.length,
-        created,
-        dryRun: body.dryRun,
-        rows,
-      },
+      total: rows.length,
+      valid: validRows.length,
+      invalid: rows.length - validRows.length,
+      created,
+      dryRun,
+      rows,
     };
+  }
+
+  app.post('/classes/:classId/students/bulk-import', async (req) => {
+    const userId = requireUser(req);
+    const { classId } = z.object({ classId: z.string().uuid() }).parse(req.params);
+    const body = z
+      .object({
+        dryRun: z.boolean().optional().default(true),
+        students: z
+          .array(importStudentSchema)
+          .min(1, '至少需要一条学生数据')
+          .max(500, '单次最多导入 500 条'),
+      })
+      .parse(req.body);
+
+    await requireClass(classId, userId);
+    const result = await runBulkImport(classId, body.students, body.dryRun);
+    return { data: result };
+  });
+
+  // Excel template for the roster bulk-import: blank rows the teacher fills
+  // in offline, then re-uploads via import-file below.
+  app.get('/classes/:classId/students/import-template', async (req, reply) => {
+    const userId = requireUser(req);
+    const { classId } = z.object({ classId: z.string().uuid() }).parse(req.params);
+    const cls = await requireClass(classId, userId);
+
+    const columns = [
+      { header: '学号', key: 'no', width: 12 },
+      { header: '姓名', key: 'name', width: 12 },
+      { header: '性别（男/女/其他，选填）', key: 'gender', width: 22 },
+      { header: '联系电话（选填）', key: 'phone', width: 18 },
+    ];
+    const buffer = await buildTemplateWorkbook(
+      '学生导入模板',
+      `${cls.name} · 学生导入模板`,
+      columns,
+      [],
+    );
+
+    const filename = `${cls.name}-学生导入模板.xlsx`;
+    return reply
+      .header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      .header('Content-Disposition', xlsxAttachment(filename))
+      .send(buffer);
+  });
+
+  // Parses an uploaded filled-in template and runs it through the same
+  // validation/preview/write path as the JSON bulk-import endpoint.
+  app.post('/classes/:classId/students/import-file', async (req) => {
+    const userId = requireUser(req);
+    const { classId } = z.object({ classId: z.string().uuid() }).parse(req.params);
+    const dryRun = z.object({ dryRun: z.string().optional() }).parse(req.query).dryRun !== 'false';
+
+    await requireClass(classId, userId);
+
+    const file = await requireUploadedFile(req);
+    const rows = await readTemplateRows(file);
+    if (!rows.length) throw ApiError.validation('模板文件为空');
+    if (rows.length > 500) throw ApiError.validation('单次最多导入 500 条');
+
+    const students: ImportStudent[] = rows.map(([no, name, genderText, phone]) => ({
+      name: (name ?? '').trim(),
+      studentNo: no?.trim() || null,
+      gender: (GENDER_LABEL_TO_CODE[(genderText ?? '').trim()] ?? null) as ImportStudent['gender'],
+      phone: phone?.trim() || null,
+    }));
+
+    const result = await runBulkImport(classId, students, dryRun);
+    return { data: result };
   });
 
   app.patch('/classes/:classId/students/batch', async (req) => {

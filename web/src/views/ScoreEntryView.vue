@@ -69,63 +69,20 @@ function toggleAbsent(row: ScoreRow) {
   if (row.isAbsent) row.score = null;
 }
 
-/** One CSV field: quote if it contains a comma, quote, or newline. */
-function csvField(v: string): string {
-  return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
-}
-
-/** Split one CSV line into fields, honoring double-quoted fields with escaped quotes. */
-function parseCsvLine(line: string): string[] {
-  const fields: string[] = [];
-  let cur = '';
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (inQuotes) {
-      if (c === '"') {
-        if (line[i + 1] === '"') {
-          cur += '"';
-          i++;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        cur += c;
-      }
-    } else if (c === '"') {
-      inQuotes = true;
-    } else if (c === ',') {
-      fields.push(cur);
-      cur = '';
-    } else {
-      cur += c;
-    }
-  }
-  fields.push(cur);
-  return fields;
-}
-
-/** Download a CSV template pre-filled with student no/name for the teacher to fill in offline. */
+/** Download an Excel template pre-filled with the roster for the teacher to fill in offline. */
 function downloadTemplate() {
   if (!sheet.value) return;
-  const lines = [
-    ['学号', '姓名', '分数', '缺考'],
-    ...sheet.value.scores.map((s) => [
-      s.studentNo ?? '',
-      s.studentName,
-      s.score != null ? String(s.score) : '',
-      s.isAbsent ? '是' : '',
-    ]),
-  ];
-  const csv = lines.map((row) => row.map(csvField).join(',')).join('\r\n');
-  // Prefix a BOM so Excel/WPS open the UTF-8 file with Chinese text intact.
-  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
-  const href = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = href;
-  a.download = `${sheet.value.exam.name}-成绩模板.csv`;
-  a.click();
-  URL.revokeObjectURL(href);
+  api
+    .blob(`/exams/${props.examId}/scores/template`)
+    .then((blob) => {
+      const href = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = href;
+      a.download = `${sheet.value?.exam.name ?? 'exam'}-成绩模板.xlsx`;
+      a.click();
+      URL.revokeObjectURL(href);
+    })
+    .catch(() => (importError.value = '模板下载失败'));
 }
 
 function pickImportFile() {
@@ -133,7 +90,9 @@ function pickImportFile() {
   fileInput.value?.click();
 }
 
-/** Import a filled-in template: match rows by 学号, falling back to 姓名. */
+type ImportedScore = { studentId: string; score: number | null; isAbsent: boolean };
+
+/** Upload a filled-in Excel template; the server matches rows by 学号, falling back to 姓名. */
 async function handleImportFile(e: Event) {
   const input = e.target as HTMLInputElement;
   const file = input.files?.[0];
@@ -142,50 +101,22 @@ async function handleImportFile(e: Event) {
 
   importError.value = '';
   try {
-    const text = await file.text();
-    const rows = text
-      .split(/\r?\n/)
-      .filter((l) => l.trim() !== '')
-      .map(parseCsvLine);
-    if (!rows.length) {
-      importError.value = '模板文件为空';
-      return;
-    }
-
-    // Skip a header row if present (first cell isn't a known student no or name).
-    const header = rows[0];
-    const looksLikeHeader = header[0] === '学号' || header[1] === '姓名';
-    const dataRows = looksLikeHeader ? rows.slice(1) : rows;
-
-    const byNo = new Map(sheet.value.scores.map((s) => [s.studentNo, s]));
-    const byName = new Map(sheet.value.scores.map((s) => [s.studentName, s]));
-
-    let matched = 0;
-    for (const cols of dataRows) {
-      const [no, name, scoreText, absentText] = cols;
-      const row = (no && byNo.get(no)) || (name && byName.get(name));
+    const res = await api.upload<Envelope<{ matched: number; skipped: string[]; scores: ImportedScore[] }>>(
+      `/exams/${props.examId}/scores/import-file`,
+      file,
+    );
+    const byId = new Map(sheet.value.scores.map((s) => [s.studentId, s]));
+    for (const update of res.data.scores) {
+      const row = byId.get(update.studentId);
       if (!row) continue;
-      matched++;
-
-      const absent = ['是', 'y', 'yes', 'true', '1'].includes((absentText ?? '').trim().toLowerCase());
-      const trimmedScore = (scoreText ?? '').trim();
-      if (absent || trimmedScore === '' || trimmedScore === '缺考') {
-        row.isAbsent = true;
-        row.score = null;
-      } else {
-        const n = Number(trimmedScore);
-        if (!Number.isNaN(n)) {
-          row.score = n;
-          row.isAbsent = false;
-        }
-      }
+      row.score = update.score;
+      row.isAbsent = update.isAbsent;
     }
-
-    if (!matched) {
-      importError.value = '未匹配到任何学生，请确认使用的是本考试导出的模板';
+    if (res.data.skipped.length) {
+      importError.value = `已导入 ${res.data.matched} 人，未匹配：${res.data.skipped.join('、')}`;
     }
-  } catch {
-    importError.value = '导入失败，请检查文件格式';
+  } catch (err) {
+    importError.value = err instanceof ApiError ? err.message : '导入失败，请检查文件格式';
   }
 }
 
@@ -233,7 +164,7 @@ onMounted(load);
           <input
             ref="fileInput"
             type="file"
-            accept=".csv,text/csv"
+            accept=".xlsx"
             style="display: none"
             @change="handleImportFile"
           />
