@@ -94,6 +94,14 @@ services:
     restart: unless-stopped
     # Outbound-only: cloudflared dials Cloudflare, nothing dials in.
     command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:?CLOUDFLARE_TUNNEL_TOKEN is required}
+    environment:
+      # Force TCP (HTTP/2) instead of the QUIC/UDP default. On this NAS's
+      # network, outbound UDP to Cloudflare's edge times out intermittently
+      # ("failed to dial to edge with quic: timeout: no recent network
+      # activity"), which flaps the tunnel and makes logins fail sporadically
+      # even though the api/web containers are healthy. TCP/443 outbound is
+      # reliable here, so pin to it.
+      TUNNEL_TRANSPORT_PROTOCOL: http2
     networks:
       - internal
     depends_on:
