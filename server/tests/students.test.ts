@@ -303,7 +303,10 @@ describe('students: Excel template import', () => {
     expect(res.headers['content-type']).toContain('spreadsheetml');
 
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(res.rawPayload);
+    // exceljs's Buffer type predates @types/node's generic Buffer<T>; the
+    // runtime value is a plain Buffer either way (see server/src/lib/excel.ts).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await workbook.xlsx.load(res.rawPayload as any);
     const values = workbook.worksheets[0]
       .getSheetValues()
       .flat()
