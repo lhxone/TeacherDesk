@@ -109,7 +109,7 @@ CI 与生产环境（`docker-compose.yml` 里的 `migrate` 服务）统一用
 
 ```bash
 cp .env.example .env    # 填入密码、JWT 密钥、Cloudflare 隧道 token
-docker compose pull     # 从 ghcr.io/lhxone 拉取 API 与 Web 镜像
+docker compose pull     # 从阿里云 ACR 拉取 API 与 Web 镜像（也同步发布到 ghcr.io/lhxone）
 docker compose up -d
 ```
 
