@@ -46,33 +46,19 @@
 - Docker 20.10+
 - Docker Compose v2
 - 至少 1GB 可用内存、2GB 磁盘空间
-- 能访问 GitHub（用于拉取 GHCR 镜像）
+- 能访问阿里云容器镜像服务（用于拉取镜像）
 
-### 2.2 登录 GHCR（必须先做）
+### 2.2 登录阿里云 ACR（必须先做）
 
-由于项目为私有仓库，**必须先登录**才能拉取镜像，否则会报 `denied` 错误。
-
-**第一步：创建 GitHub Personal Access Token**
-
-1. 登录 GitHub 网页版
-2. 进入 Settings → Developer settings → Personal access tokens → Fine-grained tokens
-3. 点击 Generate new token
-4. 配置：
-   - Token name: `nas-docker-pull`（随便填）
-   - Repository access: 选择 `Only select repositories` → 选择 `TeacherDesk`
-   - Permissions → Repository permissions → Packages: 选择 `Read-only`
-5. 点击 Generate token，**立即复制**（只显示一次）
-
-**第二步：在 NAS 上登录 GHCR**
+镜像托管在阿里云容器镜像服务（ACR），仓库为私有，**必须先登录**才能拉取，否则会报 `denied` 错误。
+（此前用的是 GHCR——从国内网络拉取时经常在某个镜像层卡死不动，改用国内可直连的 ACR 后不再有这个问题。）
 
 ```bash
-# 将 YOUR_TOKEN 替换为刚才生成的 token
-echo "YOUR_TOKEN" | docker login ghcr.io -u lhxone --password-stdin
+docker login crpi-7l6kwk12l9aqux5u.cn-hangzhou.personal.cr.aliyuncs.com
+# 用户名为阿里云账号全名，密码为 ACR 访问凭证页设置的仓库登录密码
 ```
 
-看到 `Login Succeeded` 表示登录成功。
-
-**安全提示：** Token 只应临时使用，不要写入 `.env` 文件。登录信息会保存在 `~/.docker/config.json` 中，后续拉取无需重复登录。
+看到 `Login Succeeded` 表示登录成功。登录信息会保存在 `~/.docker/config.json` 中，后续拉取无需重复登录。
 
 ### 2.3 Cloudflare 配置
 
@@ -344,10 +330,10 @@ docker compose exec db psql -U teacherdesk -d teacherdesk -c "\di uq_*"
 
 ## 7. 镜像信息
 
-GitHub Actions 构建的镜像托管在 GHCR：
+GitHub Actions 构建的镜像同时推送到 GHCR 和阿里云 ACR；`docker-compose.yml` 使用 ACR（国内网络更稳定）：
 
-- **API 镜像：** `ghcr.io/lhxone/teacherdesk-api`
-- **Web 镜像：** `ghcr.io/lhxone/teacherdesk-web`
+- **API 镜像：** `crpi-7l6kwk12l9aqux5u.cn-hangzhou.personal.cr.aliyuncs.com/lhxone/teacherdesk-api`（镜像：`ghcr.io/lhxone/teacherdesk-api`）
+- **Web 镜像：** `crpi-7l6kwk12l9aqux5u.cn-hangzhou.personal.cr.aliyuncs.com/lhxone/teacherdesk-web`（镜像：`ghcr.io/lhxone/teacherdesk-web`）
 
 可用标签：
 - `latest` - 最新的 main 分支构建

@@ -93,11 +93,23 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # Mirrors every image to Alibaba Cloud ACR too: GHCR is often slow or
+      # outright stalls (a single blob layer hanging indefinitely) when pulled
+      # from mainland China, which is where the NAS this app deploys to lives.
+      - name: Log in to Alibaba Cloud ACR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: crpi-7l6kwk12l9aqux5u.cn-hangzhou.personal.cr.aliyuncs.com
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
       - name: Generate image metadata
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+          images: |
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+            crpi-7l6kwk12l9aqux5u.cn-hangzhou.personal.cr.aliyuncs.com/lhxone/${{ matrix.image }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=tag

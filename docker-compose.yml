@@ -7,6 +7,14 @@
 #
 # Traffic path:
 #   browser -> Cloudflare edge -> tunnel -> web (nginx) -> /api -> api -> db
+#
+# Images are pulled from Alibaba Cloud ACR (crpi-7l6kwk12l9aqux5u.cn-hangzhou.
+# personal.cr.aliyuncs.com), not ghcr.io — GHCR pulls from this NAS's network
+# (mainland China) would reliably stall on one blob layer. CI (container.yml)
+# publishes to both registries; only ACR is used here. The `teacherdesk-api`/
+# `teacherdesk-web` repos there are private, so `docker login` to that
+# registry once on this host before the first `docker compose pull`:
+#   docker login crpi-7l6kwk12l9aqux5u.cn-hangzhou.personal.cr.aliyuncs.com
 
 services:
   db:
@@ -36,7 +44,7 @@ services:
     # Reuse the api image rather than declaring a second build of the same
     # context: two build entries produce two independently-cached images, which
     # silently drift apart when only one is rebuilt.
-    image: ghcr.io/lhxone/teacherdesk-api:${TEACHERDESK_IMAGE_TAG:-latest}
+    image: crpi-7l6kwk12l9aqux5u.cn-hangzhou.personal.cr.aliyuncs.com/lhxone/teacherdesk-api:${TEACHERDESK_IMAGE_TAG:-latest}
     restart: "no"
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-teacherdesk}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-teacherdesk}?schema=public
@@ -56,7 +64,7 @@ services:
         echo "migrations complete"
 
   api:
-    image: ghcr.io/lhxone/teacherdesk-api:${TEACHERDESK_IMAGE_TAG:-latest}
+    image: crpi-7l6kwk12l9aqux5u.cn-hangzhou.personal.cr.aliyuncs.com/lhxone/teacherdesk-api:${TEACHERDESK_IMAGE_TAG:-latest}
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -82,7 +90,7 @@ services:
         condition: service_completed_successfully
 
   web:
-    image: ghcr.io/lhxone/teacherdesk-web:${TEACHERDESK_IMAGE_TAG:-latest}
+    image: crpi-7l6kwk12l9aqux5u.cn-hangzhou.personal.cr.aliyuncs.com/lhxone/teacherdesk-web:${TEACHERDESK_IMAGE_TAG:-latest}
     restart: unless-stopped
     networks:
       - internal
