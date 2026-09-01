@@ -89,6 +89,20 @@ const aisleAfter = computed(() => {
   return set;
 });
 
+// Grid column tracks: every seat column is an equal `minmax(64px, 1fr)`
+// track; an aisle inserts a fixed-width gap track of its own instead of a
+// per-cell margin, so margins don't eat into one column's box and leave
+// seat cells visibly different sizes across the row.
+const gridTemplateColumns = computed(() => {
+  const colCount = chart.value?.colCount ?? 0;
+  const tracks: string[] = [];
+  for (let c = 0; c < colCount; c++) {
+    tracks.push('minmax(64px, 1fr)');
+    if (aisleAfter.value.has(c)) tracks.push('22px');
+  }
+  return tracks.join(' ');
+});
+
 async function loadCharts() {
   const res = await api.get<Envelope<SeatingChartSummary[]>>(
     `/classes/${props.classId}/seating-charts`,
@@ -133,6 +147,49 @@ async function createChart() {
     await loadChart(res.data.id);
   } catch (e) {
     createError.value = e instanceof ApiError ? e.message : '创建失败';
+  }
+}
+
+async function renameChart() {
+  if (!chart.value) return;
+  const name = window.prompt('方案名称', chart.value.name)?.trim();
+  if (!name || name === chart.value.name) return;
+  error.value = '';
+  try {
+    await api.patch(`/seating-charts/${chart.value.id}`, { name });
+    chart.value.name = name;
+    await loadCharts();
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.message : '重命名失败';
+  }
+}
+
+async function setActiveChart() {
+  if (!chart.value || chart.value.isActive) return;
+  error.value = '';
+  try {
+    await api.patch(`/seating-charts/${chart.value.id}`, { isActive: true });
+    chart.value.isActive = true;
+    await loadCharts();
+    message.value = '✓ 已设为使用中';
+    setTimeout(() => (message.value = ''), 2500);
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.message : '设置失败';
+  }
+}
+
+async function deleteChart() {
+  if (!chart.value) return;
+  if (!window.confirm(`确定删除「${chart.value.name}」？此操作不可恢复。`)) return;
+  error.value = '';
+  try {
+    await api.del(`/seating-charts/${chart.value.id}`);
+    chart.value = null;
+    await loadCharts();
+    const next = charts.value.find((c) => c.isActive) ?? charts.value[0];
+    if (next) await loadChart(next.id);
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.message : '删除失败';
   }
 }
 
@@ -285,6 +342,16 @@ onMounted(async () => {
         </select>
         <button class="btn" @click="showCreate = true">+ 新方案</button>
         <template v-if="chart && isDesktop">
+          <button class="btn" title="重命名当前方案" @click="renameChart">重命名</button>
+          <button
+            v-if="!chart.isActive"
+            class="btn"
+            title="将当前方案设为使用中"
+            @click="setActiveChart"
+          >
+            设为使用中
+          </button>
+          <button class="btn" title="删除当前方案" @click="deleteChart">删除</button>
           <button class="btn" @click="showRandomize = true">随机排座</button>
           <button class="btn" @click="print">打印</button>
           <button class="btn btn-primary" :disabled="saving" @click="save">
@@ -307,50 +374,47 @@ onMounted(async () => {
       <div class="board-wrap">
         <div v-if="podium === 'top'" class="podium">讲台</div>
 
-        <div
-          class="board"
-          :style="{ gridTemplateColumns: `repeat(${chart.colCount}, minmax(64px, 1fr))` }"
-        >
+        <div class="board" :style="{ gridTemplateColumns }">
           <template v-for="r in rows" :key="r">
-            <div
-              v-for="c in cols"
-              :key="`${r}-${c}`"
-              class="seat"
-              :class="{
-                disabled: disabledSet.has(`${r}:${c}`),
-                filled: seatMap.get(`${r}:${c}`),
-                pinned: seatMap.get(`${r}:${c}`)?.isPinned,
-                'aisle-after': aisleAfter.has(c),
-                male: seatMap.get(`${r}:${c}`)?.gender === 'male',
-                female: seatMap.get(`${r}:${c}`)?.gender === 'female',
-              }"
-              @dragover.prevent
-              @drop="onDrop(r, c)"
-            >
-              <template v-if="seatMap.get(`${r}:${c}`)">
-                <div
-                  class="seat-card"
-                  :draggable="isDesktop"
-                  @dragstart="onDragStart(seatMap.get(`${r}:${c}`)!.studentId)"
-                >
-                  <span class="seat-name">{{ seatMap.get(`${r}:${c}`)!.studentName }}</span>
-                  <span class="seat-no">{{ seatMap.get(`${r}:${c}`)!.studentNo ?? '' }}</span>
-                  <div v-if="isDesktop" class="seat-actions no-print">
-                    <button
-                      class="mini"
-                      :title="seatMap.get(`${r}:${c}`)!.isPinned ? '取消固定' : '固定座位'"
-                      @click.stop="togglePin(seatMap.get(`${r}:${c}`)!.studentId)"
-                    >
-                      {{ seatMap.get(`${r}:${c}`)!.isPinned ? '📌' : '📍' }}
-                    </button>
-                    <button class="mini" title="移出座位" @click.stop="unseat(seatMap.get(`${r}:${c}`)!.studentId)">
-                      ×
-                    </button>
+            <template v-for="c in cols" :key="`${r}-${c}`">
+              <div
+                class="seat"
+                :class="{
+                  disabled: disabledSet.has(`${r}:${c}`),
+                  filled: seatMap.get(`${r}:${c}`),
+                  pinned: seatMap.get(`${r}:${c}`)?.isPinned,
+                  male: seatMap.get(`${r}:${c}`)?.gender === 'male',
+                  female: seatMap.get(`${r}:${c}`)?.gender === 'female',
+                }"
+                @dragover.prevent
+                @drop="onDrop(r, c)"
+              >
+                <template v-if="seatMap.get(`${r}:${c}`)">
+                  <div
+                    class="seat-card"
+                    :draggable="isDesktop"
+                    @dragstart="onDragStart(seatMap.get(`${r}:${c}`)!.studentId)"
+                  >
+                    <span class="seat-name">{{ seatMap.get(`${r}:${c}`)!.studentName }}</span>
+                    <span class="seat-no">{{ seatMap.get(`${r}:${c}`)!.studentNo ?? '' }}</span>
+                    <div v-if="isDesktop" class="seat-actions no-print">
+                      <button
+                        class="mini"
+                        :title="seatMap.get(`${r}:${c}`)!.isPinned ? '取消固定' : '固定座位'"
+                        @click.stop="togglePin(seatMap.get(`${r}:${c}`)!.studentId)"
+                      >
+                        {{ seatMap.get(`${r}:${c}`)!.isPinned ? '📌' : '📍' }}
+                      </button>
+                      <button class="mini" title="移出座位" @click.stop="unseat(seatMap.get(`${r}:${c}`)!.studentId)">
+                        ×
+                      </button>
+                    </div>
                   </div>
-                </div>
-              </template>
-              <span v-else-if="!disabledSet.has(`${r}:${c}`)" class="seat-empty">空位</span>
-            </div>
+                </template>
+                <span v-else-if="!disabledSet.has(`${r}:${c}`)" class="seat-empty">空位</span>
+              </div>
+              <div v-if="aisleAfter.has(c)" class="aisle-gap" aria-hidden="true"></div>
+            </template>
           </template>
         </div>
 
@@ -464,9 +528,10 @@ onMounted(async () => {
   position: relative;
 }
 
-/* Aisle: extra right-margin after the last seat of every column group except
-   the final one — a purely visual gap, not a seat cell of its own. */
-.seat.aisle-after { margin-right: 22px; }
+/* Aisle: a dedicated empty grid track between column groups, not a margin on
+   a seat cell — so every seat column keeps the same track size regardless of
+   where the aisle falls. */
+.aisle-gap { background: transparent; }
 
 .seat.disabled { background: #f1f5f9; border-style: solid; opacity: 0.5; }
 .seat.filled { border-style: solid; border-color: var(--brand); background: var(--brand-soft); }
