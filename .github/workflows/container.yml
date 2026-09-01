@@ -38,6 +38,9 @@ jobs:
       DATABASE_URL: postgresql://teacherdesk:teacherdesk_test@localhost:5432/teacherdesk_test?schema=public
       JWT_SECRET: ci-only-not-a-production-secret
       NODE_ENV: test
+      # registerUser() test helper needs this to bootstrap its seed account
+      # (see server/tests/helpers.ts) — matches the local server/.env.test.
+      INITIAL_INVITE_CODE: ci-bootstrap
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
