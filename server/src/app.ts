@@ -1,6 +1,7 @@
 import Fastify, { FastifyInstance, FastifyRequest } from 'fastify';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
+import rateLimit from '@fastify/rate-limit';
 import { ZodError } from 'zod';
 import { config } from './config.js';
 import { ApiError } from './errors.js';
@@ -43,6 +44,19 @@ export function requireUser(req: FastifyRequest): string {
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
     logger: config.isTest ? false : { level: 'info' },
+    // api is never reached directly (docker-compose.yml keeps it off any
+    // published port); the only caller is this deployment's own nginx, which
+    // resolves Cloudflare's CF-Connecting-IP into the real client IP and
+    // forwards it via X-Forwarded-For (web/nginx.conf). `true` here would be
+    // wrong: @fastify/proxy-addr trusts every hop it's given and reads the
+    // *left*-most (i.e. earliest, client-supplied) entry, so a caller could
+    // put `X-Forwarded-For: 1.2.3.4` on their own request — nginx only
+    // appends to that header, it doesn't replace it — and spoof req.ip,
+    // defeating both the rate limiter below and the login lockout in
+    // lib/auth.ts. 'uniquelocal' (RFC1918 + fc00::/7) makes proxy-addr trust
+    // only the docker-internal hop (nginx) and stop there, using the IP
+    // nginx itself recorded — the one no client request can override.
+    trustProxy: 'uniquelocal',
   });
 
   await app.register(cors, {
@@ -55,6 +69,25 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(multipart, {
     limits: { fileSize: 5 * 1024 * 1024, files: 1 },
   });
+
+  // Global per-IP request cap as defence in depth on top of the dedicated
+  // login lockout in lib/auth.ts (which stays in charge of the 5-failures /
+  // 15-minute rule tested in auth.test.ts). This one just stops a single
+  // client from hammering *any* endpoint — registration, refresh, exports,
+  // the classroom tools — at high volume. Disabled under test: `app.inject()`
+  // calls don't carry distinct sockets, so every request in a test file would
+  // otherwise share one counter and trip the limit well before the 179 cases
+  // that intentionally loop requests (e.g. the lockout test itself) finish.
+  if (!config.isTest) {
+    await app.register(rateLimit, {
+      global: true,
+      max: 300,
+      timeWindow: '1 minute',
+      errorResponseBuilder: () => ({
+        error: { code: 'RATE_LIMITED', message: '请求过于频繁，请稍后再试' },
+      }),
+    });
+  }
 
   // Authentication: populate req.userId, reject protected routes without a token.
   app.addHook('onRequest', async (req) => {
