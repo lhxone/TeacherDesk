@@ -28,6 +28,8 @@ export type UserSettings = {
   gradeThresholds: { excellent: number; good: number; pass: number };
   pushRemindersEnabled: boolean;
   remindBeforeMinutes: number;
+  /** "放学提醒": independent of pushRemindersEnabled — pings 5 min after the day's last schedule block ends. */
+  endOfDayReminderEnabled: boolean;
   /** IANA time zone (e.g. "Asia/Shanghai") the day schedule / reminders are computed in. */
   timeZone: string | null;
 };
@@ -162,9 +164,11 @@ export type EventItem = {
 };
 
 export type SeatLayout = {
+  /** Which row is nearest the podium/front of the room. Defaults to 'top' (row 0). */
   podium?: 'top' | 'bottom';
   disabledCells?: [number, number][];
-  aisles?: { afterCols: number[] };
+  /** Column groups for visual aisle gaps, e.g. [2, 4, 2] on an 8-column chart. Must sum to colCount. */
+  aisles?: { groups: number[] };
 };
 
 export type SeatingChartSummary = {

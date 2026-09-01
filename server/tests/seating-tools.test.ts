@@ -162,6 +162,53 @@ describe('seating: charts', () => {
     expect(res.statusCode).toBe(422);
     expect(res.json().error.details[0].message).toContain('超出新尺寸');
   });
+
+  it('rejects an aisle group split whose columns do not sum to colCount', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/classes/${classId}/seating-charts`,
+      headers: user.auth,
+      payload: {
+        name: '过道版',
+        rowCount: 4,
+        colCount: 6,
+        layout: { aisles: { groups: [2, 2] } }, // sums to 4, not 6
+      },
+    });
+
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.message).toContain('过道分组列数之和');
+  });
+
+  it('accepts an aisle group split that sums to colCount', async () => {
+    const chartId = await createChart({
+      colCount: 6,
+      layout: { aisles: { groups: [2, 2, 2] } },
+    });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/seating-charts/${chartId}`,
+      headers: user.auth,
+    });
+
+    expect(res.json().data.layout.aisles.groups).toEqual([2, 2, 2]);
+  });
+
+  it('rejects a PATCH that breaks the aisle/colCount invariant', async () => {
+    const chartId = await createChart({
+      colCount: 6,
+      layout: { aisles: { groups: [2, 2, 2] } },
+    });
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/seating-charts/${chartId}`,
+      headers: user.auth,
+      payload: { colCount: 4 }, // existing aisles still sum to 6
+    });
+
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.message).toContain('过道分组列数之和');
+  });
 });
 
 describe('seating: randomize', () => {
@@ -228,6 +275,37 @@ describe('seating: randomize', () => {
     expect(res.statusCode).toBe(422);
     expect(res.json().error.message).toContain('座位不足');
     expect(await prisma.seatAssignment.count({ where: { seatingChartId: chartId } })).toBe(0);
+  });
+
+  it('respects podium: "bottom" from the chart layout when randomizing', async () => {
+    // 6 students on a 4x4 grid with podium at the bottom: the front (last)
+    // row must fill first, exercising the route's podiumOf(chart.layout) wiring.
+    const chartId = await createChart({
+      rowCount: 4,
+      colCount: 4,
+      layout: { podium: 'bottom' },
+    });
+    await createStudents(
+      app,
+      user,
+      classId,
+      Array.from({ length: 2 }, (_, i) => ({ name: `多${i}`, gender: 'male' as const })),
+    );
+    // 14 students total now; shrink grid usage isn't the point, just confirm
+    // rows nearest the bottom fill before the ones nearest the top do.
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/seating-charts/${chartId}/randomize`,
+      headers: user.auth,
+      payload: { persist: false },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const assignments = res.json().data.assignments as { rowIndex: number }[];
+    const row3 = assignments.filter((a) => a.rowIndex === 3).length;
+    const row0 = assignments.filter((a) => a.rowIndex === 0).length;
+    expect(row3).toBe(4);
+    expect(row0).toBeLessThanOrEqual(row3);
   });
 });
 

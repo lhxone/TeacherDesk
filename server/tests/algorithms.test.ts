@@ -80,6 +80,50 @@ describe('seating: randomize', () => {
     expect(tagged.every((a) => a.rowIndex === 0)).toBe(true);
   });
 
+  it('fills the front row before spilling into the next one', () => {
+    // 4 cols x 4 rows, 6 students: the front row (row 0) must be full before
+    // row 1 gets anyone, rather than students being scattered across every
+    // open seat uniformly.
+    const result = randomizeSeating(students(6), [], {
+      rowCount: 4,
+      colCount: 4,
+      rng: seededRng(2),
+    });
+    const row0 = result.assignments.filter((a) => a.rowIndex === 0);
+    const row1 = result.assignments.filter((a) => a.rowIndex === 1);
+    expect(row0).toHaveLength(4);
+    expect(row1).toHaveLength(2);
+    expect(result.assignments.every((a) => a.rowIndex <= 1)).toBe(true);
+  });
+
+  it('podium "bottom" fills from the last row outward instead of row 0', () => {
+    const result = randomizeSeating(students(6), [], {
+      rowCount: 4,
+      colCount: 4,
+      podium: 'bottom',
+      rng: seededRng(2),
+    });
+    const lastRow = result.assignments.filter((a) => a.rowIndex === 3);
+    const secondLast = result.assignments.filter((a) => a.rowIndex === 2);
+    expect(lastRow).toHaveLength(4);
+    expect(secondLast).toHaveLength(2);
+    expect(result.assignments.every((a) => a.rowIndex >= 2)).toBe(true);
+  });
+
+  it('podium "bottom" also seats front-row-tagged students in the last row', () => {
+    const roster = students(12).map((s, i) => ({ ...s, tagIds: i < 3 ? ['focus'] : [] }));
+    const result = randomizeSeating(roster, [], {
+      rowCount: 4,
+      colCount: 4,
+      podium: 'bottom',
+      frontRowTagIds: ['focus'],
+      rng: seededRng(5),
+    });
+
+    const tagged = result.assignments.filter((a) => ['s0', 's1', 's2'].includes(a.studentId));
+    expect(tagged.every((a) => a.rowIndex === 3)).toBe(true);
+  });
+
   it('AC-9: throws with a shortfall when seats are fewer than students', () => {
     expect(() =>
       randomizeSeating(students(20), [], { rowCount: 2, colCount: 4, rng: seededRng(1) }),

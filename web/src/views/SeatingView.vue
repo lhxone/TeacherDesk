@@ -15,7 +15,32 @@ const error = ref('');
 const message = ref('');
 
 const showCreate = ref(false);
-const createForm = ref({ name: '日常版', rowCount: 6, colCount: 8 });
+const createForm = ref({
+  name: '日常版',
+  rowCount: 6,
+  colCount: 8,
+  podium: 'top' as 'top' | 'bottom',
+  // Comma-separated column-group sizes for aisle gaps, e.g. "2,4,2". Kept as
+  // free text in the form (not parsed until submit) so a teacher can type
+  // digits and commas naturally; empty means "no aisles".
+  aislesInput: '',
+});
+const createError = ref('');
+
+/** Parses "2,4,2" into [2,4,2], validating it sums to colCount. Empty input means no aisles. */
+function parseAisleGroups(input: string, colCount: number): number[] | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  const groups = trimmed.split(',').map((s) => Number(s.trim()));
+  if (groups.some((n) => !Number.isInteger(n) || n < 1)) {
+    throw new Error('过道分组需为正整数，用逗号分隔，例如 2,4,2');
+  }
+  const sum = groups.reduce((a, b) => a + b, 0);
+  if (sum !== colCount) {
+    throw new Error(`过道分组列数之和（${sum}）必须等于总列数（${colCount}）`);
+  }
+  return groups;
+}
 
 const showRandomize = ref(false);
 const randomOptions = ref({ keepPinned: true, avoidSameGenderAdjacent: false });
@@ -37,8 +62,32 @@ const disabledSet = computed(
   () => new Set((chart.value?.layout.disabledCells ?? []).map(([r, c]) => `${r}:${c}`)),
 );
 
-const rows = computed(() => Array.from({ length: chart.value?.rowCount ?? 0 }, (_, i) => i));
+const podium = computed<'top' | 'bottom'>(() => chart.value?.layout.podium ?? 'top');
+
+// `rowIndex` in the data is always "distance from row 0"; when the podium is
+// at the bottom of the room, row 0 is actually the *back* row, so the visual
+// stacking order (top of the page to bottom) must reverse to put row 0 last.
+const rows = computed(() => {
+  const list = Array.from({ length: chart.value?.rowCount ?? 0 }, (_, i) => i);
+  return podium.value === 'bottom' ? list.reverse() : list;
+});
 const cols = computed(() => Array.from({ length: chart.value?.colCount ?? 0 }, (_, i) => i));
+
+// Aisle gaps: `aisles.groups` (e.g. [2,4,2]) partitions every column into
+// visual clusters. `aisleAfter` is the set of column indices that get extra
+// right-margin (a gap) rendered after them — the last column of every group
+// except the final one.
+const aisleAfter = computed(() => {
+  const groups = chart.value?.layout.aisles?.groups;
+  if (!groups?.length) return new Set<number>();
+  const set = new Set<number>();
+  let col = -1;
+  for (let g = 0; g < groups.length - 1; g++) {
+    col += groups[g];
+    set.add(col);
+  }
+  return set;
+});
 
 async function loadCharts() {
   const res = await api.get<Envelope<SeatingChartSummary[]>>(
@@ -54,16 +103,36 @@ async function loadChart(id: string) {
 
 async function createChart() {
   error.value = '';
+  createError.value = '';
+  const { name, rowCount, colCount, podium: podiumChoice, aislesInput } = createForm.value;
+
+  let aisleGroups: number[] | null;
+  try {
+    aisleGroups = parseAisleGroups(aislesInput, colCount);
+  } catch (e) {
+    createError.value = e instanceof Error ? e.message : '过道分组格式不正确';
+    return;
+  }
+
   try {
     const res = await api.post<Envelope<{ id: string }>>(
       `/classes/${props.classId}/seating-charts`,
-      { ...createForm.value, isActive: charts.value.length === 0 },
+      {
+        name,
+        rowCount,
+        colCount,
+        layout: {
+          podium: podiumChoice,
+          ...(aisleGroups ? { aisles: { groups: aisleGroups } } : {}),
+        },
+        isActive: charts.value.length === 0,
+      },
     );
     showCreate.value = false;
     await loadCharts();
     await loadChart(res.data.id);
   } catch (e) {
-    error.value = e instanceof ApiError ? e.message : '创建失败';
+    createError.value = e instanceof ApiError ? e.message : '创建失败';
   }
 }
 
@@ -236,7 +305,7 @@ onMounted(async () => {
 
     <div v-else class="seating-layout">
       <div class="board-wrap">
-        <div class="podium">讲台</div>
+        <div v-if="podium === 'top'" class="podium">讲台</div>
 
         <div
           class="board"
@@ -251,6 +320,9 @@ onMounted(async () => {
                 disabled: disabledSet.has(`${r}:${c}`),
                 filled: seatMap.get(`${r}:${c}`),
                 pinned: seatMap.get(`${r}:${c}`)?.isPinned,
+                'aisle-after': aisleAfter.has(c),
+                male: seatMap.get(`${r}:${c}`)?.gender === 'male',
+                female: seatMap.get(`${r}:${c}`)?.gender === 'female',
               }"
               @dragover.prevent
               @drop="onDrop(r, c)"
@@ -281,6 +353,8 @@ onMounted(async () => {
             </div>
           </template>
         </div>
+
+        <div v-if="podium === 'bottom'" class="podium podium-bottom">讲台</div>
       </div>
 
       <aside v-if="isDesktop" class="pool no-print">
@@ -304,6 +378,7 @@ onMounted(async () => {
 
     <ModalDialog v-if="showCreate" title="新建座位方案" @close="showCreate = false">
       <form class="stack" @submit.prevent="createChart">
+        <p v-if="createError" class="error-text">{{ createError }}</p>
         <div class="field">
           <label>方案名称</label>
           <input v-model="createForm.name" class="input" required />
@@ -315,6 +390,22 @@ onMounted(async () => {
         <div class="field">
           <label>列数</label>
           <input v-model.number="createForm.colCount" class="input" type="number" min="1" max="20" />
+        </div>
+        <div class="field">
+          <label>讲台位置</label>
+          <select v-model="createForm.podium" class="select">
+            <option value="top">上方（第 1 行离讲台最近）</option>
+            <option value="bottom">下方（最后一行离讲台最近）</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>过道分组（可选）</label>
+          <input
+            v-model="createForm.aislesInput"
+            class="input"
+            placeholder="例如 2,4,2，留空表示不设过道"
+          />
+          <p class="hint">按列数分组，组之间会显示一条过道；各组列数之和需等于总列数。</p>
         </div>
       </form>
       <template #footer>
@@ -358,6 +449,8 @@ onMounted(async () => {
   letter-spacing: 4px;
 }
 
+.podium-bottom { margin-bottom: 0; margin-top: 14px; }
+
 .board { display: grid; gap: 8px; min-width: min-content; }
 
 .seat {
@@ -371,9 +464,21 @@ onMounted(async () => {
   position: relative;
 }
 
+/* Aisle: extra right-margin after the last seat of every column group except
+   the final one — a purely visual gap, not a seat cell of its own. */
+.seat.aisle-after { margin-right: 22px; }
+
 .seat.disabled { background: #f1f5f9; border-style: solid; opacity: 0.5; }
 .seat.filled { border-style: solid; border-color: var(--brand); background: var(--brand-soft); }
 .seat.pinned { border-color: var(--warning); background: #fffbeb; }
+
+/* Gender shown as a seat-card color cue rather than an icon/label, so it
+   reads at a glance without taking up extra text space. Kept subtle enough
+   to stay legible alongside .filled/.pinned's border-color overrides. */
+.seat.filled.male { background: #eff6ff; }
+.seat.filled.female { background: #fdf2f8; }
+.seat.filled.male.pinned { background: #fffbeb; border-color: #3b82f6; }
+.seat.filled.female.pinned { background: #fffbeb; border-color: #ec4899; }
 
 .seat-card {
   width: 100%;

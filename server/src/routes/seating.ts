@@ -10,7 +10,12 @@ const layoutSchema = z
   .object({
     podium: z.enum(['top', 'bottom']).optional(),
     disabledCells: z.array(z.tuple([z.number().int(), z.number().int()])).optional(),
-    aisles: z.object({ afterCols: z.array(z.number().int()) }).optional(),
+    // Column groups for visual aisle gaps, e.g. [2, 4, 2] on an 8-column chart
+    // renders two seats, an aisle, four seats, an aisle, two seats. Aisles are
+    // purely visual spacing — they don't occupy a seat cell and never
+    // participate in randomize/assignment math. `groups` must sum to colCount
+    // (enforced where layout is written, since that needs colCount in scope).
+    aisles: z.object({ groups: z.array(z.number().int().min(1)).min(1) }).optional(),
   })
   .passthrough();
 
@@ -26,6 +31,22 @@ type Layout = z.infer<typeof layoutSchema>;
 
 function disabledOf(layout: unknown): [number, number][] {
   return ((layout as Layout)?.disabledCells ?? []) as [number, number][];
+}
+
+function podiumOf(layout: unknown): 'top' | 'bottom' {
+  return (layout as Layout)?.podium ?? 'top';
+}
+
+/** Aisle column groups must exactly partition every column, or the grid math breaks. */
+function assertAislesMatchColCount(layout: Layout | undefined, colCount: number) {
+  const groups = layout?.aisles?.groups;
+  if (!groups) return;
+  const sum = groups.reduce((a, b) => a + b, 0);
+  if (sum !== colCount) {
+    throw ApiError.businessRule(
+      `过道分组列数之和（${sum}）必须等于总列数（${colCount}）`,
+    );
+  }
 }
 
 export async function registerSeatingRoutes(app: FastifyInstance) {
@@ -60,6 +81,7 @@ export async function registerSeatingRoutes(app: FastifyInstance) {
     const { classId } = z.object({ classId: z.string().uuid() }).parse(req.params);
     const body = createSchema.parse(req.body);
     await requireClass(classId, userId);
+    assertAislesMatchColCount(body.layout, body.colCount);
 
     // Deactivate first: uq_chart_active rejects a second active row, so the
     // clear must land before the insert, and both must be atomic.
@@ -139,6 +161,8 @@ export async function registerSeatingRoutes(app: FastifyInstance) {
 
     const rowCount = body.rowCount ?? chart.rowCount;
     const colCount = body.colCount ?? chart.colCount;
+    const layout = body.layout ?? (chart.layout as Layout | undefined);
+    assertAislesMatchColCount(layout, colCount);
 
     // Shrinking the grid must not orphan seated students (API.md §7 PATCH).
     if (rowCount < chart.rowCount || colCount < chart.colCount) {
@@ -284,6 +308,7 @@ export async function registerSeatingRoutes(app: FastifyInstance) {
           keepPinned: body.keepPinned,
           frontRowTagIds: body.frontRowTagIds,
           avoidSameGenderAdjacent: body.avoidSameGenderAdjacent,
+          podium: podiumOf(chart.layout),
         },
       );
     } catch (e) {

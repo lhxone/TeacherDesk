@@ -145,6 +145,10 @@ async function saveDaySchedule() {
 // --- push reminders ---
 const pushRemindersEnabled = ref(auth.user?.settings.pushRemindersEnabled ?? false);
 const remindBeforeMinutes = ref(auth.user?.settings.remindBeforeMinutes ?? 5);
+// "放学提醒" — independent of pushRemindersEnabled (server-side: lib/reminder.ts
+// checks it on its own), but shares the same browser push subscription, so
+// turning it on still needs enablePush() the first time nothing else has.
+const endOfDayReminderEnabled = ref(auth.user?.settings.endOfDayReminderEnabled ?? false);
 const pushBusy = ref(false);
 const pushMsg = ref('');
 const canPush = ref(false);
@@ -173,30 +177,40 @@ async function saveTimeZone() {
   }
 }
 
+// Both reminder kinds ride on the same browser push subscription, so it's
+// only safe to tear that subscription down when neither toggle needs it —
+// otherwise turning off "推送提醒" would silently also kill 放学提醒.
+async function ensurePushSubscribed(): Promise<boolean> {
+  const ok = await enablePush();
+  permission.value = pushPermission();
+  if (!ok) {
+    error.value =
+      permission.value === 'denied'
+        ? '浏览器已拒绝通知权限，请在站点设置中手动开启'
+        : '开启推送失败，可能是浏览器不支持或服务端未配置';
+    return false;
+  }
+  // First time enabling push: lock in the browser's own timezone so
+  // reminder times are computed correctly, unless already set explicitly.
+  if (!timeZoneSaved.value) {
+    timeZone.value = detectedTimeZone;
+    await auth.updateSettings({ timeZone: detectedTimeZone });
+    timeZoneSaved.value = true;
+  }
+  return true;
+}
+
 async function togglePush(on: boolean) {
   pushBusy.value = true;
   pushMsg.value = '';
   error.value = '';
   try {
     if (on) {
-      const ok = await enablePush();
-      permission.value = pushPermission();
-      if (!ok) {
+      if (!(await ensurePushSubscribed())) {
         pushRemindersEnabled.value = false;
-        error.value =
-          permission.value === 'denied'
-            ? '浏览器已拒绝通知权限，请在站点设置中手动开启'
-            : '开启推送失败，可能是浏览器不支持或服务端未配置';
         return;
       }
-      // First time enabling push: lock in the browser's own timezone so
-      // reminder times are computed correctly, unless already set explicitly.
-      if (!timeZoneSaved.value) {
-        timeZone.value = detectedTimeZone;
-        await auth.updateSettings({ timeZone: detectedTimeZone });
-        timeZoneSaved.value = true;
-      }
-    } else {
+    } else if (!endOfDayReminderEnabled.value) {
       await disablePush();
     }
     await auth.updateSettings({ pushRemindersEnabled: on });
@@ -204,6 +218,30 @@ async function togglePush(on: boolean) {
     pushMsg.value = on ? '✓ 已开启推送提醒' : '已关闭推送提醒';
   } catch (e) {
     pushRemindersEnabled.value = !on;
+    error.value = e instanceof ApiError ? e.message : '操作失败';
+  } finally {
+    pushBusy.value = false;
+  }
+}
+
+async function toggleEndOfDayReminder(on: boolean) {
+  pushBusy.value = true;
+  pushMsg.value = '';
+  error.value = '';
+  try {
+    if (on) {
+      if (!(await ensurePushSubscribed())) {
+        endOfDayReminderEnabled.value = false;
+        return;
+      }
+    } else if (!pushRemindersEnabled.value) {
+      await disablePush();
+    }
+    await auth.updateSettings({ endOfDayReminderEnabled: on });
+    endOfDayReminderEnabled.value = on;
+    pushMsg.value = on ? '✓ 已开启放学提醒' : '已关闭放学提醒';
+  } catch (e) {
+    endOfDayReminderEnabled.value = !on;
     error.value = e instanceof ApiError ? e.message : '操作失败';
   } finally {
     pushBusy.value = false;
@@ -426,14 +464,24 @@ async function logout() {
               :disabled="pushBusy"
               @change="togglePush(($event.target as HTMLInputElement).checked)"
             />
-            <span>开启推送提醒</span>
+            <span>开启推送提醒（课程 / 待办）</span>
+          </label>
+
+          <label class="check">
+            <input
+              type="checkbox"
+              :checked="endOfDayReminderEnabled"
+              :disabled="pushBusy"
+              @change="toggleEndOfDayReminder(($event.target as HTMLInputElement).checked)"
+            />
+            <span>开启放学提醒（今日作息结束 5 分钟后提醒）</span>
           </label>
 
           <div class="field">
             <label>时区</label>
             <input v-model="timeZone" class="input" placeholder="Asia/Shanghai" />
             <p class="hint">
-              课程与待办提醒都按这个时区计算触发时间。已按当前浏览器自动填入
+              课程、待办与放学提醒都按这个时区计算触发时间。已按当前浏览器自动填入
               {{ detectedTimeZone }}，换设备/换地区后请重新确认。
             </p>
             <button class="btn btn-sm btn-primary" style="align-self: flex-start" @click="saveTimeZone">

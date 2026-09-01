@@ -47,6 +47,12 @@ export const DEFAULT_SETTINGS = {
   // start the notification fires.
   pushRemindersEnabled: false,
   remindBeforeMinutes: 5,
+  // "放学提醒": a separate toggle (independent of pushRemindersEnabled above)
+  // that pushes one notification 5 minutes after the last daySchedule block of
+  // the day ends, telling the teacher today's schedule is over. Kept
+  // independent because a teacher may want this end-of-day ping without
+  // wanting per-lesson/todo reminders, or vice versa.
+  endOfDayReminderEnabled: false,
   // IANA time zone (e.g. "Asia/Shanghai") the user's day schedule is wall-clock
   // in. This app is public and teachers can be anywhere, so reminders must be
   // computed per-user — never assume everyone is in the server's zone. Falls
