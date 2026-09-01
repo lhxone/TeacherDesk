@@ -12,17 +12,26 @@ datasource db {
 }
 
 model User {
-  id           String    @id @default(uuid()) @db.Uuid
-  email        String    @unique @db.VarChar(255)
-  passwordHash String    @map("password_hash") @db.VarChar(255)
-  displayName  String    @map("display_name") @db.VarChar(64)
-  avatarUrl    String?   @map("avatar_url") @db.VarChar(512)
-  settings     Json      @default("{}")
-  lastLoginAt  DateTime? @map("last_login_at") @db.Timestamptz(6)
-  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
-  deletedAt    DateTime? @map("deleted_at") @db.Timestamptz(6)
+  id              String    @id @default(uuid()) @db.Uuid
+  email           String    @unique @db.VarChar(255)
+  passwordHash    String    @map("password_hash") @db.VarChar(255)
+  displayName     String    @map("display_name") @db.VarChar(64)
+  avatarUrl       String?   @map("avatar_url") @db.VarChar(512)
+  settings        Json      @default("{}")
+  // Unique, permanent invite code every user is issued at registration; they
+  // share it (via an invite link) so a new teacher can register. Never
+  // regenerated once set.
+  inviteCode      String    @unique @map("invite_code") @db.VarChar(16)
+  // The user whose invite code this account registered with. Null for
+  // accounts created with the bootstrap INITIAL_INVITE_CODE (i.e. no inviter).
+  invitedByUserId String?   @map("invited_by_user_id") @db.Uuid
+  lastLoginAt     DateTime? @map("last_login_at") @db.Timestamptz(6)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz(6)
 
+  invitedBy         User?              @relation("UserInvites", fields: [invitedByUserId], references: [id], onDelete: SetNull)
+  invitees          User[]             @relation("UserInvites")
   refreshTokens     RefreshToken[]
   classes           Class[]
   scheduleSlots     ScheduleSlot[]

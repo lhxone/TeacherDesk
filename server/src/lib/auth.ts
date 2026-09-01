@@ -26,6 +26,21 @@ export function verifyAccessToken(token: string): JwtPayload {
   }
 }
 
+// No 0/O/1/I/L — characters that are easy to mis-type or mis-read when a
+// teacher copies an invite code by hand instead of following the link.
+const INVITE_CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+const INVITE_CODE_LENGTH = 8;
+
+/** Random invite code for a newly-registered user. Uniqueness is enforced by the caller (unique column + retry). */
+export function generateInviteCode(): string {
+  const bytes = crypto.randomBytes(INVITE_CODE_LENGTH);
+  let code = '';
+  for (let i = 0; i < INVITE_CODE_LENGTH; i++) {
+    code += INVITE_CODE_ALPHABET[bytes[i] % INVITE_CODE_ALPHABET.length];
+  }
+  return code;
+}
+
 /** Opaque refresh token; only its SHA-256 hash is persisted. */
 export function generateRefreshToken(): { token: string; hash: string } {
   const token = `rt_${crypto.randomBytes(32).toString('hex')}`;

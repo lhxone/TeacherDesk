@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { createTestApp, prisma, registerUser, resetDb } from './helpers.js';
+import { config } from '../src/config.js';
 
 let app: FastifyInstance;
 
@@ -19,10 +20,16 @@ beforeEach(async () => {
 
 describe('auth: registration', () => {
   it('creates an account and returns tokens', async () => {
+    const seed = await registerUser(app);
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/auth/register',
-      payload: { email: 'new@example.com', password: 'Passw0rd123', displayName: '李老师' },
+      payload: {
+        email: 'new@example.com',
+        password: 'Passw0rd123',
+        displayName: '李老师',
+        inviteCode: seed.inviteCode,
+      },
     });
 
     expect(res.statusCode).toBe(201);
@@ -31,6 +38,7 @@ describe('auth: registration', () => {
     expect(data.accessToken).toBeTruthy();
     expect(data.refreshToken).toMatch(/^rt_/);
     expect(data.user).not.toHaveProperty('passwordHash');
+    expect(data.user.inviteCode).toBeTruthy();
   });
 
   it('never stores the password in plain text', async () => {
@@ -42,20 +50,31 @@ describe('auth: registration', () => {
   });
 
   it('normalises the email to lower case', async () => {
+    const seed = await registerUser(app);
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/auth/register',
-      payload: { email: 'MiXeD@Example.COM', password: 'Passw0rd123', displayName: 'T' },
+      payload: {
+        email: 'MiXeD@Example.COM',
+        password: 'Passw0rd123',
+        displayName: 'T',
+        inviteCode: seed.inviteCode,
+      },
     });
     expect(res.json().data.user.email).toBe('mixed@example.com');
   });
 
   it('rejects a duplicate email with 409', async () => {
-    await registerUser(app, { email: 'dup@example.com' });
+    const seed = await registerUser(app, { email: 'dup@example.com' });
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/auth/register',
-      payload: { email: 'dup@example.com', password: 'Passw0rd123', displayName: 'X' },
+      payload: {
+        email: 'dup@example.com',
+        password: 'Passw0rd123',
+        displayName: 'X',
+        inviteCode: seed.inviteCode,
+      },
     });
 
     expect(res.statusCode).toBe(409);
@@ -67,10 +86,16 @@ describe('auth: registration', () => {
     ['letters only', 'PasswordOnly', '字母和数字'],
     ['digits only', '12345678', '字母和数字'],
   ])('rejects a weak password (%s)', async (_label, password) => {
+    const seed = await registerUser(app);
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/auth/register',
-      payload: { email: `weak${_label.replace(/\s/g, '')}@example.com`, password, displayName: 'X' },
+      payload: {
+        email: `weak${_label.replace(/\s/g, '')}@example.com`,
+        password,
+        displayName: 'X',
+        inviteCode: seed.inviteCode,
+      },
     });
 
     expect(res.statusCode).toBe(400);
@@ -78,12 +103,109 @@ describe('auth: registration', () => {
   });
 
   it('rejects a malformed email', async () => {
+    const seed = await registerUser(app);
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/auth/register',
-      payload: { email: 'not-an-email', password: 'Passw0rd123', displayName: 'X' },
+      payload: {
+        email: 'not-an-email',
+        password: 'Passw0rd123',
+        displayName: 'X',
+        inviteCode: seed.inviteCode,
+      },
     });
     expect(res.statusCode).toBe(400);
+  });
+});
+
+describe('auth: invite codes', () => {
+  it('rejects registration with no invite code', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: { email: 'noinvite@example.com', password: 'Passw0rd123', displayName: 'X' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('rejects an unknown invite code', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: {
+        email: 'badinvite@example.com',
+        password: 'Passw0rd123',
+        displayName: 'X',
+        inviteCode: 'NOTAREALCODE',
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.message).toBe('邀请码无效');
+  });
+
+  it('registers the first account with the bootstrap invite code', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: {
+        email: 'first@example.com',
+        password: 'Passw0rd123',
+        displayName: '第一个老师',
+        inviteCode: config.initialInviteCode,
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().data.user.inviteCode).toBeTruthy();
+  });
+
+  it('rejects the bootstrap invite code once a user already exists', async () => {
+    await registerUser(app);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: {
+        email: 'second@example.com',
+        password: 'Passw0rd123',
+        displayName: 'X',
+        inviteCode: config.initialInviteCode,
+      },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('records the inviter and lets one invite code be reused for multiple registrations', async () => {
+    const inviter = await registerUser(app);
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: {
+        email: 'invitee1@example.com',
+        password: 'Passw0rd123',
+        displayName: 'A',
+        inviteCode: inviter.inviteCode,
+      },
+    });
+    const second = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: {
+        email: 'invitee2@example.com',
+        password: 'Passw0rd123',
+        displayName: 'B',
+        inviteCode: inviter.inviteCode,
+      },
+    });
+
+    expect(first.statusCode).toBe(201);
+    expect(second.statusCode).toBe(201);
+
+    const invitee1 = await prisma.user.findFirstOrThrow({ where: { email: 'invitee1@example.com' } });
+    const invitee2 = await prisma.user.findFirstOrThrow({ where: { email: 'invitee2@example.com' } });
+    expect(invitee1.invitedByUserId).toBe(inviter.id);
+    expect(invitee2.invitedByUserId).toBe(inviter.id);
+    expect(invitee1.inviteCode).not.toBe(invitee2.inviteCode);
   });
 });
 

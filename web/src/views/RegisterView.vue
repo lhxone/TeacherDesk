@@ -1,16 +1,20 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { ApiError } from '@/api/client';
 
 const auth = useAuthStore();
 const router = useRouter();
+const route = useRoute();
 
 const displayName = ref('');
 const email = ref('');
 const password = ref('');
 const confirm = ref('');
+// Prefilled from an invite link's ?invite= query param, if present, so the
+// person who was invited doesn't have to retype it.
+const inviteCode = ref(typeof route.query.invite === 'string' ? route.query.invite : '');
 const error = ref('');
 const submitting = ref(false);
 
@@ -27,6 +31,7 @@ const canSubmit = computed(
   () =>
     displayName.value.trim() &&
     email.value.trim() &&
+    inviteCode.value.trim() &&
     passwordValid.value &&
     password.value === confirm.value,
 );
@@ -35,7 +40,7 @@ async function submit() {
   error.value = '';
   submitting.value = true;
   try {
-    await auth.register(email.value, password.value, displayName.value);
+    await auth.register(email.value, password.value, displayName.value, inviteCode.value.trim());
     router.push({ name: 'home' });
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : '注册失败，请稍后重试';
@@ -62,6 +67,18 @@ async function submit() {
       <div class="field">
         <label for="email">邮箱</label>
         <input id="email" v-model="email" class="input" type="email" required autocomplete="email" />
+      </div>
+
+      <div class="field">
+        <label for="inviteCode">邀请码</label>
+        <input
+          id="inviteCode"
+          v-model="inviteCode"
+          class="input"
+          required
+          autocomplete="off"
+          placeholder="向已注册的老师索取邀请码"
+        />
       </div>
 
       <div class="field">
