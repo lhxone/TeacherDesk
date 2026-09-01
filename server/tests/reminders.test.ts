@@ -201,6 +201,78 @@ describe('reminder scan: lessons', () => {
   });
 });
 
+describe('reminder scan: end of day', () => {
+  async function enableEndOfDay() {
+    await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/auth/me',
+      headers: user.auth,
+      payload: { settings: { endOfDayReminderEnabled: true } },
+    });
+  }
+
+  it('pushes 5 minutes after the last daySchedule block ends (default schedule, UTC+8)', async () => {
+    await enableEndOfDay();
+    // Default schedule's last block (第8节) ends 17:50 local (UTC+8) == 09:50 UTC.
+    // +5 minutes => 09:55 UTC.
+    const pushed = await runReminderScan(new Date('2026-09-14T09:55:00.000Z'));
+    expect(pushed).toBe(1);
+    expect(sent[0].payload).toMatchObject({ title: '今日课程已结束' });
+  });
+
+  it('does not push before the 5-minute delay has elapsed', async () => {
+    await enableEndOfDay();
+    expect(await runReminderScan(new Date('2026-09-14T09:54:00.000Z'))).toBe(0);
+  });
+
+  it('does not push twice for the same day', async () => {
+    await enableEndOfDay();
+    await runReminderScan(new Date('2026-09-14T09:55:00.000Z'));
+    await runReminderScan(new Date('2026-09-14T09:56:00.000Z'));
+    expect(sent).toHaveLength(1);
+  });
+
+  it('is independent of pushRemindersEnabled', async () => {
+    // pushRemindersEnabled stays false/default here — only endOfDayReminderEnabled is set.
+    await enableEndOfDay();
+    const classId = await createClass(app, user);
+    await app.inject({ method: 'POST', url: '/api/v1/schedule/slots', headers: user.auth,
+      payload: { classId, subject: '数学', weekday: 1, period: 1, repeatRule: 'weekly' } });
+
+    // A lesson-start instant should NOT push (pushRemindersEnabled is off)...
+    const lessonPushed = await runReminderScan(new Date('2026-09-13T23:56:00.000Z'));
+    expect(lessonPushed).toBe(0);
+
+    // ...but the end-of-day ping still fires on its own schedule.
+    const eodPushed = await runReminderScan(new Date('2026-09-14T09:55:00.000Z'));
+    expect(eodPushed).toBe(1);
+    expect(sent[0].payload).toMatchObject({ title: '今日课程已结束' });
+  });
+
+  it('uses the custom daySchedule\'s latest-ending block, not just the last array entry', async () => {
+    await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/auth/me',
+      headers: user.auth,
+      payload: {
+        settings: {
+          endOfDayReminderEnabled: true,
+          daySchedule: [
+            { key: 'p1', kind: 'lesson', label: '第1节', start: '08:00', end: '08:45' },
+            { key: 'club', kind: 'activity', label: '社团活动', start: '15:00', end: '16:00' },
+          ],
+        },
+      },
+    });
+    // 16:00 local (UTC+8) == 08:00 UTC. +5 min => 08:05 UTC.
+    expect(await runReminderScan(new Date('2026-09-14T08:05:00.000Z'))).toBe(1);
+  });
+
+  it('sends nothing when the toggle is off', async () => {
+    expect(await runReminderScan(new Date('2026-09-14T09:55:00.000Z'))).toBe(0);
+  });
+});
+
 describe('push subscription routes', () => {
   it('reports push disabled when no VAPID key is configured', async () => {
     const res = await app.inject({

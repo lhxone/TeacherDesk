@@ -17,6 +17,9 @@ import { formatDate, slotOccursOn } from './schedule.js';
 import { lessonPeriodTimes } from './daySchedule.js';
 import { wallTimeToInstant as wallTimeToInstantTz, startOfLocalDay as startOfLocalDayTz } from './timezone.js';
 
+/** Minutes after the day's last daySchedule block ends before the 放学 ping fires. */
+const END_OF_DAY_DELAY_MINUTES = 5;
+
 type Settings = typeof DEFAULT_SETTINGS;
 
 type PushLogger = { warn: (o: unknown, m?: string) => void };
@@ -29,14 +32,20 @@ export async function runReminderScan(now: Date = new Date()): Promise<number> {
 
   for (const user of users) {
     const settings = { ...DEFAULT_SETTINGS, ...(user.settings as object) } as Settings;
-    if (!settings.pushRemindersEnabled) continue;
-
-    const lead = Math.max(1, settings.remindBeforeMinutes || DEFAULT_SETTINGS.remindBeforeMinutes);
-    const windowEnd = new Date(now.getTime() + lead * 60_000);
     const tz = settings.timeZone ?? null;
 
-    pushed += await remindLessons(user.id, settings, tz, now, windowEnd);
-    pushed += await remindTodos(user.id, now, windowEnd, lead);
+    if (settings.pushRemindersEnabled) {
+      const lead = Math.max(1, settings.remindBeforeMinutes || DEFAULT_SETTINGS.remindBeforeMinutes);
+      const windowEnd = new Date(now.getTime() + lead * 60_000);
+      pushed += await remindLessons(user.id, settings, tz, now, windowEnd);
+      pushed += await remindTodos(user.id, now, windowEnd, lead);
+    }
+
+    // Independent of pushRemindersEnabled — the 放学 ping has its own toggle
+    // and its own fixed 5-minute-after delay, not the user's lead time.
+    if (settings.endOfDayReminderEnabled) {
+      pushed += await remindEndOfDay(user.id, settings, tz, now);
+    }
   }
 
   return pushed;
@@ -133,6 +142,48 @@ async function remindTodos(userId: string, now: Date, windowEnd: Date, lead: num
   }
   void lead;
   return pushed;
+}
+
+/**
+ * "放学提醒": one push, `END_OF_DAY_DELAY_MINUTES` after the last daySchedule
+ * block (lesson or activity — whichever ends latest) of *today* finishes,
+ * telling the teacher today's schedule is done.
+ *
+ * Unlike remindLessons/remindTodos this fires *after* the event it's about,
+ * so the window check is `triggerTime <= now`, not "starts within lead
+ * minutes". A late-side bound (one scan interval of slack) stops a scan that
+ * was down for a while from firing a stale ping for a day long past —
+ * `alreadySent`/`markSent` still do the real dedup work either way.
+ */
+async function remindEndOfDay(
+  userId: string,
+  settings: Settings,
+  tz: string | null,
+  now: Date,
+) {
+  const schedule = settings.daySchedule?.length ? settings.daySchedule : DEFAULT_SETTINGS.daySchedule;
+  if (!schedule.length) return 0;
+
+  const today = startOfLocalDayTz(now, tz, config.localTzOffsetMinutes);
+  const lastBlock = schedule.reduce((latest, it) => (it.end > latest.end ? it : latest));
+  const blockEnd = wallTimeToInstantTz(today, lastBlock.end, tz, config.localTzOffsetMinutes);
+  if (!blockEnd) return 0;
+
+  const triggerTime = new Date(blockEnd.getTime() + END_OF_DAY_DELAY_MINUTES * 60_000);
+  const staleAfter = new Date(triggerTime.getTime() + config.reminderScanIntervalMs * 3);
+  if (now < triggerTime || now > staleAfter) return 0;
+
+  const occursAt = triggerTime;
+  if (await alreadySent(userId, 'eod', 'eod', occursAt)) return 0;
+
+  const delivered = await sendPushToUser(userId, {
+    title: '今日课程已结束',
+    body: `${lastBlock.label}已结束，放学愉快`,
+    tag: `eod-${formatDate(today)}`,
+    url: '/',
+  }, scanLogger);
+  await markSent(userId, 'eod', 'eod', occursAt);
+  return delivered > 0 ? 1 : 0;
 }
 
 /** Delete ledger rows for occurrences more than a day old. */

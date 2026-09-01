@@ -1,7 +1,14 @@
 /**
  * Seat randomisation. Implements PRD §3.5.2 constraints:
  *  - pinned students keep their exact seat (AC-8)
- *  - students carrying `frontRowTagIds` are placed from the front rows outward
+ *  - students carrying `frontRowTagIds` get first claim on the row(s) nearest
+ *    the podium; everyone else fills row-by-row from the podium outward too
+ *    (each row shuffled internally), rather than being scattered uniformly
+ *    across every remaining seat — a class should fill its front rows before
+ *    leaving gaps up front and people in the back.
+ *  - `podium` ('top' | 'bottom', default 'top') says which row is physically
+ *    nearest the front of the room; "row 0" is only "the front" when podium
+ *    is 'top'.
  *  - optional "avoid same gender adjacent" as a best-effort local repair
  */
 
@@ -27,6 +34,8 @@ export type RandomizeOptions = {
   keepPinned?: boolean;
   frontRowTagIds?: string[];
   avoidSameGenderAdjacent?: boolean;
+  /** Which row is nearest the podium/front of the room. Defaults to 'top' (row 0). */
+  podium?: 'top' | 'bottom';
   /** Injectable RNG so tests are deterministic. */
   rng?: () => number;
 };
@@ -89,18 +98,44 @@ export function randomizeSeating(
     throw err;
   }
 
-  // Front-row priority students get the lowest row indices available.
+  // "Distance from the podium": row 0 is the front when podium is 'top'
+  // (default); when it's 'bottom', the last row is. Both the front-row-tag
+  // placement and the general fill-order below measure from this, not from
+  // a hardcoded row 0, so a chart with podium:'bottom' fills correctly.
+  const podium = options.podium ?? 'top';
+  const distanceFromPodium = (rowIndex: number) =>
+    podium === 'bottom' ? options.rowCount - 1 - rowIndex : rowIndex;
+
+  // Front-row-tag students get first claim on the cells nearest the podium.
   const frontTags = new Set(options.frontRowTagIds ?? []);
   const isFront = (s: RandomizeStudent) => (s.tagIds ?? []).some((t) => frontTags.has(t));
 
   const frontStudents = shuffle(toPlace.filter(isFront), rng);
+  // Shuffle once up front so *which* students land in which row is random;
+  // the row-by-row grouping below only constrains fill *order*, not who ends
+  // up where within that order.
   const otherStudents = shuffle(toPlace.filter((s) => !isFront(s)), rng);
 
   const sortedCells = [...freeCells].sort(
-    (a, b) => a.rowIndex - b.rowIndex || a.colIndex - b.colIndex,
+    (a, b) => distanceFromPodium(a.rowIndex) - distanceFromPodium(b.rowIndex) || a.colIndex - b.colIndex,
   );
   const frontCells = sortedCells.slice(0, frontStudents.length);
-  const remainingCells = shuffle(sortedCells.slice(frontStudents.length), rng);
+  const cellsForOthers = sortedCells.slice(frontStudents.length);
+
+  // Fill row-by-row outward from the podium: group the remaining cells by
+  // distance, shuffle the seat order *within* each row group (so who sits at
+  // which column is still random), then hand out `otherStudents` in that
+  // concatenated order — so a row fills up before the next one gets anyone,
+  // rather than students being scattered uniformly across every open seat.
+  const rowGroups = new Map<number, SeatCell[]>();
+  for (const cell of cellsForOthers) {
+    const d = distanceFromPodium(cell.rowIndex);
+    if (!rowGroups.has(d)) rowGroups.set(d, []);
+    rowGroups.get(d)!.push(cell);
+  }
+  const remainingCells = [...rowGroups.keys()]
+    .sort((a, b) => a - b)
+    .flatMap((d) => shuffle(rowGroups.get(d)!, rng));
 
   const assignments = [
     ...pinned.map((p) => ({
