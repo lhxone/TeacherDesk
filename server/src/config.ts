@@ -4,6 +4,11 @@ export const config = {
   port: Number(process.env.PORT ?? 3000),
   host: process.env.HOST ?? '0.0.0.0',
   jwtSecret: process.env.JWT_SECRET ?? 'dev-secret-change-me',
+  // Bootstrap invite code: only usable to register the very first account
+  // (i.e. while the users table is empty). Every account after that,
+  // including the one created with this code, has its own permanent invite
+  // code (see User.inviteCode) and registration requires one.
+  initialInviteCode: process.env.INITIAL_INVITE_CODE ?? '',
   accessTokenTtlSec: 7200,
   refreshTokenTtlDays: 7,
   refreshTokenTtlDaysRemember: 30,

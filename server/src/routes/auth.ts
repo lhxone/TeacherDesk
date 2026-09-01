@@ -11,6 +11,7 @@ import { isValidTimeZone } from '../lib/timezone.js';
 import {
   assertNotLocked,
   clearLoginFailures,
+  generateInviteCode,
   generateRefreshToken,
   hashPassword,
   hashRefreshToken,
@@ -25,6 +26,7 @@ const registerSchema = z.object({
   email: z.string().email('邮箱格式不正确').max(255),
   password: z.string(),
   displayName: z.string().min(1, '昵称不能为空').max(64),
+  inviteCode: z.string().min(1, '请填写邀请码'),
 });
 
 const loginSchema = z.object({
@@ -39,6 +41,7 @@ function publicUser(u: {
   displayName: string;
   avatarUrl: string | null;
   settings: unknown;
+  inviteCode: string;
   createdAt: Date;
 }) {
   return {
@@ -47,6 +50,7 @@ function publicUser(u: {
     displayName: u.displayName,
     avatarUrl: u.avatarUrl,
     settings: { ...DEFAULT_SETTINGS, ...(u.settings as object) },
+    inviteCode: u.inviteCode,
     createdAt: u.createdAt.toISOString(),
   };
 }
@@ -76,20 +80,60 @@ export async function registerAuthRoutes(app: FastifyInstance) {
   app.post('/auth/register', async (req, reply) => {
     const body = registerSchema.parse(req.body);
     const email = body.email.toLowerCase().trim();
+    const inviteCode = body.inviteCode.trim().toUpperCase();
 
     validatePasswordStrength(body.password);
 
     const existing = await prisma.user.findFirst({ where: { email, deletedAt: null } });
     if (existing) throw ApiError.conflict('该邮箱已注册');
 
-    const user = await prisma.user.create({
-      data: {
-        email,
-        passwordHash: await hashPassword(body.password),
-        displayName: body.displayName.trim(),
-        settings: DEFAULT_SETTINGS,
-      },
+    // Resolve the invite code to an inviter, or accept the env-configured
+    // bootstrap code — but only while no user exists yet, so it can't be
+    // reused to bypass the invite system once the first account is created.
+    let invitedByUserId: string | null = null;
+    const inviter = await prisma.user.findFirst({
+      where: { inviteCode, deletedAt: null },
     });
+    if (inviter) {
+      invitedByUserId = inviter.id;
+    } else if (config.initialInviteCode && inviteCode === config.initialInviteCode.toUpperCase()) {
+      const userCount = await prisma.user.count();
+      if (userCount > 0) {
+        throw ApiError.validation('邀请码无效', [
+          { field: 'inviteCode', message: '初始邀请码仅用于创建第一个账号' },
+        ]);
+      }
+    } else {
+      throw ApiError.validation('邀请码无效', [{ field: 'inviteCode', message: '邀请码无效' }]);
+    }
+
+    // Invite codes are unique-constrained; retry generation on the (extremely
+    // unlikely) collision rather than failing the whole registration.
+    let user;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        user = await prisma.user.create({
+          data: {
+            email,
+            passwordHash: await hashPassword(body.password),
+            displayName: body.displayName.trim(),
+            settings: DEFAULT_SETTINGS,
+            inviteCode: generateInviteCode(),
+            invitedByUserId,
+          },
+        });
+        break;
+      } catch (e) {
+        // Only retry on an invite-code collision; any other conflict (e.g. a
+        // concurrent registration with the same email) should surface as-is.
+        const isInviteCodeCollision =
+          e instanceof Prisma.PrismaClientKnownRequestError &&
+          e.code === 'P2002' &&
+          (e.meta?.target as string[] | undefined)?.includes('invite_code');
+        if (isInviteCodeCollision && attempt < 5) continue;
+        throw e;
+      }
+    }
 
     const tokens = await issueTokens(user.id, user.email, false, req.headers['user-agent']);
     return reply.status(201).send({ data: { user: publicUser(user), ...tokens } });

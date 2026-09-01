@@ -131,7 +131,7 @@ describe('auth store: cross-account data isolation', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(201, AUTH_PAYLOAD)));
 
     const auth = useAuthStore();
-    await auth.register('new@example.com', 'Passw0rd123', '新老师');
+    await auth.register('new@example.com', 'Passw0rd123', '新老师', 'INVITE123');
 
     expect(deleted).toContain('td-data');
     expect(tokenStore.access).toBe('access-1');

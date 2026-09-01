@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/app.js';
 import { prisma } from '../src/db.js';
+import { config } from '../src/config.js';
 import { resetAllLoginFailures } from '../src/lib/auth.js';
 
 export async function createTestApp(): Promise<FastifyInstance> {
@@ -22,6 +23,10 @@ export async function resetDb() {
     RESTART IDENTITY CASCADE;
   `);
   resetAllLoginFailures();
+  // A fresh table means the bootstrap invite code is usable again; forget any
+  // cached seed user from a previous test so the next registerUser() call
+  // re-derives it instead of reusing a now-deleted user's invite code.
+  seedInviteCode = null;
 }
 
 let userCounter = 0;
@@ -33,19 +38,52 @@ export type TestUser = {
   accessToken: string;
   refreshToken: string;
   auth: { authorization: string };
+  inviteCode: string;
 };
 
-export async function registerUser(
-  app: FastifyInstance,
-  overrides: Partial<{ email: string; password: string; displayName: string }> = {},
-): Promise<TestUser> {
-  const email = overrides.email ?? `teacher${++userCounter}@example.com`;
-  const password = overrides.password ?? 'Passw0rd123';
+// Registration now requires an invite code. Tests that don't care about the
+// invite mechanics just want *a* working account, so the first registerUser()
+// call in a test (after resetDb()) bootstraps one seed user with
+// INITIAL_INVITE_CODE, and every subsequent call defaults to that seed user's
+// own invite code — most existing call sites don't need to change.
+let seedInviteCode: string | null = null;
+
+async function resolveInviteCode(app: FastifyInstance): Promise<string> {
+  if (seedInviteCode) return seedInviteCode;
+
+  if (!config.initialInviteCode) {
+    throw new Error('INITIAL_INVITE_CODE must be set for tests (see server/.env.test)');
+  }
 
   const res = await app.inject({
     method: 'POST',
     url: '/api/v1/auth/register',
-    payload: { email, password, displayName: overrides.displayName ?? '测试老师' },
+    payload: {
+      email: `seed${++userCounter}@example.com`,
+      password: 'Passw0rd123',
+      displayName: '种子老师',
+      inviteCode: config.initialInviteCode,
+    },
+  });
+  if (res.statusCode !== 201) {
+    throw new Error(`seed registration failed: ${res.statusCode} ${res.body}`);
+  }
+  seedInviteCode = res.json().data.user.inviteCode;
+  return seedInviteCode!;
+}
+
+export async function registerUser(
+  app: FastifyInstance,
+  overrides: Partial<{ email: string; password: string; displayName: string; inviteCode: string }> = {},
+): Promise<TestUser> {
+  const email = overrides.email ?? `teacher${++userCounter}@example.com`;
+  const password = overrides.password ?? 'Passw0rd123';
+  const inviteCode = overrides.inviteCode ?? (await resolveInviteCode(app));
+
+  const res = await app.inject({
+    method: 'POST',
+    url: '/api/v1/auth/register',
+    payload: { email, password, displayName: overrides.displayName ?? '测试老师', inviteCode },
   });
 
   if (res.statusCode !== 201) {
@@ -60,6 +98,7 @@ export async function registerUser(
     accessToken: body.accessToken,
     refreshToken: body.refreshToken,
     auth: { authorization: `Bearer ${body.accessToken}` },
+    inviteCode: body.user.inviteCode,
   };
 }
 

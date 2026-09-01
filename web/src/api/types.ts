@@ -8,6 +8,8 @@ export type User = {
   displayName: string;
   avatarUrl: string | null;
   settings: UserSettings;
+  /** This user's own permanent invite code — share it (as a registration link) to invite others. */
+  inviteCode: string;
   createdAt: string;
 };
 

@@ -109,6 +109,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   sortable?.destroy();
+  clearTimeout(inviteLinkCopiedTimer);
 });
 
 function resetDaySchedule() {
@@ -285,6 +286,25 @@ const newPassword = ref('');
 const message = ref('');
 const error = ref('');
 
+// --- invite code ---
+const inviteLinkCopied = ref(false);
+let inviteLinkCopiedTimer: ReturnType<typeof setTimeout> | undefined;
+
+async function copyInviteLink() {
+  error.value = '';
+  const code = auth.user?.inviteCode;
+  if (!code) return;
+  const link = `${window.location.origin}/register?invite=${code}`;
+  try {
+    await navigator.clipboard.writeText(link);
+    inviteLinkCopied.value = true;
+    clearTimeout(inviteLinkCopiedTimer);
+    inviteLinkCopiedTimer = setTimeout(() => (inviteLinkCopied.value = false), 2000);
+  } catch {
+    error.value = '复制失败，请手动复制邀请链接';
+  }
+}
+
 async function saveProfile() {
   error.value = '';
   message.value = '';
@@ -377,6 +397,15 @@ async function logout() {
           </div>
           <button class="btn btn-primary" @click="saveProfile">保存</button>
         </div>
+      </section>
+
+      <section class="card">
+        <div class="card-title">邀请码</div>
+        <p class="hint">分享邀请链接给其他老师，对方打开后可直接注册。</p>
+        <div class="invite-code">{{ auth.user?.inviteCode }}</div>
+        <button class="btn btn-primary" style="margin-top: 10px" @click="copyInviteLink">
+          {{ inviteLinkCopied ? '✓ 已复制' : '复制邀请链接' }}
+        </button>
       </section>
 
       <section class="card">
@@ -578,6 +607,20 @@ async function logout() {
 
 <style scoped>
 .narrow { max-width: 520px; }
+
+.invite-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  padding: 10px 14px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  text-align: center;
+}
+
 .check { display: flex; align-items: center; gap: 8px; font-size: 14px; }
 
 .build-version {

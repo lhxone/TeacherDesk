@@ -11,11 +11,17 @@ export const useAuthStore = defineStore('auth', () => {
 
   const isAuthenticated = computed(() => Boolean(user.value));
 
-  async function register(email: string, password: string, displayName: string) {
+  async function register(
+    email: string,
+    password: string,
+    displayName: string,
+    inviteCode: string,
+  ) {
     const res = await api.post<Envelope<AuthResult>>('/auth/register', {
       email,
       password,
       displayName,
+      inviteCode,
     });
     // Purge before adopting the new identity: a previous session that ended
     // uncleanly (crash, closed tab, expired token) can leave another teacher's
