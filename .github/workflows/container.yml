@@ -132,5 +132,10 @@ jobs:
             GIT_COMMIT_HASH=${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: type=gha,mode=max,scope=${{ matrix.component }}
-          provenance: mode=max
-          sbom: true
+          # Alibaba Cloud ACR rejects the provenance/SBOM attestation manifest
+          # buildx otherwise attaches ("denied: unknown manifest class for
+          # application/vnd.oci.empty.v1+json") — GHCR accepts it fine, but
+          # since this build now pushes to both registries in one step, drop
+          # both attestations so the multi-registry push succeeds everywhere.
+          provenance: false
+          sbom: false
