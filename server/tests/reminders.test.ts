@@ -108,6 +108,50 @@ describe('reminder scan: todos', () => {
 
     expect(await runReminderScan(now)).toBe(1);
   });
+
+  it('pushes for a weekly-recurring todo on a later week, not just its first', async () => {
+    await enableReminders(5);
+    // "每周三值班" starting Wednesday 2026-09-02, 09:04 UTC. 2026-09-16 is a
+    // later Wednesday.
+    await app.inject({ method: 'POST', url: '/api/v1/events', headers: user.auth,
+      payload: { title: '值班', startAt: '2026-09-02T09:04:00.000Z', repeatWeekday: 3 } });
+
+    const now = new Date('2026-09-16T09:00:00.000Z');
+    const pushed = await runReminderScan(now);
+
+    expect(pushed).toBe(1);
+    expect(sent[0].payload).toMatchObject({ title: '待办：值班' });
+  });
+
+  it('does not push twice for the same week of a recurring todo, but does push the next week', async () => {
+    await enableReminders(5);
+    await app.inject({ method: 'POST', url: '/api/v1/events', headers: user.auth,
+      payload: { title: '值班', startAt: '2026-09-02T09:04:00.000Z', repeatWeekday: 3 } });
+
+    await runReminderScan(new Date('2026-09-16T09:00:00.000Z'));
+    await runReminderScan(new Date('2026-09-16T09:01:00.000Z'));
+    expect(sent).toHaveLength(1);
+
+    await runReminderScan(new Date('2026-09-23T09:00:00.000Z'));
+    expect(sent).toHaveLength(2);
+  });
+
+  it('skips a week whose occurrence was marked done, but still pushes other weeks', async () => {
+    await enableReminders(5);
+    const created = await app.inject({ method: 'POST', url: '/api/v1/events', headers: user.auth,
+      payload: { title: '值班', startAt: '2026-09-02T09:04:00.000Z', repeatWeekday: 3 } });
+    const eventId = created.json().data.id;
+
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/events/${eventId}/occurrences/2026-09-16`,
+      headers: user.auth,
+      payload: { isDone: true },
+    });
+
+    expect(await runReminderScan(new Date('2026-09-16T09:00:00.000Z'))).toBe(0);
+    expect(await runReminderScan(new Date('2026-09-23T09:00:00.000Z'))).toBe(1);
+  });
 });
 
 describe('reminder scan: lessons', () => {

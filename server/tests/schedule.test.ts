@@ -3,6 +3,8 @@ import {
   dateRange,
   formatDate,
   isoWeekday,
+  projectRecurringEvent,
+  recurringEventOccursOn,
   slotOccursOn,
   weekIndex,
   weekParity,
@@ -83,6 +85,44 @@ describe('schedule: slot occurrence', () => {
   it('has no date bounds when startDate and endDate are null', () => {
     const slot = { weekday: 3, repeatRule: 'weekly', startDate: null, endDate: null };
     expect(slotOccursOn(slot, d('2020-01-01'))).toBe(true); // a Wednesday
+  });
+});
+
+describe('schedule: recurring events', () => {
+  // "每周三值班" starting 2026-09-02 (a Wednesday), 08:00–08:30.
+  const duty = {
+    startAt: new Date('2026-09-02T08:00:00.000Z'),
+    endAt: new Date('2026-09-02T08:30:00.000Z') as Date | null,
+    repeatWeekday: 3,
+  };
+
+  it('occurs on every matching weekday from its start date onward', () => {
+    expect(recurringEventOccursOn(duty, d('2026-09-09'))).toBe(true); // next Wed
+    expect(recurringEventOccursOn(duty, d('2026-09-16'))).toBe(true);
+    expect(recurringEventOccursOn(duty, d('2026-09-10'))).toBe(false); // Thursday
+  });
+
+  it('does not occur before its own start date', () => {
+    expect(recurringEventOccursOn(duty, d('2026-08-26'))).toBe(false); // a Wednesday, but earlier
+  });
+
+  it('a non-recurring event never "occurs" via this check', () => {
+    expect(recurringEventOccursOn({ ...duty, repeatWeekday: null }, d('2026-09-09'))).toBe(false);
+  });
+
+  it('projects the original time-of-day onto a later matching date', () => {
+    const projected = projectRecurringEvent(duty, d('2026-09-16'));
+    expect(formatDate(projected.startAt)).toBe('2026-09-16');
+    expect(projected.startAt.getUTCHours()).toBe(8);
+    expect(projected.startAt.getUTCMinutes()).toBe(0);
+    expect(formatDate(projected.endAt!)).toBe('2026-09-16');
+    expect(projected.endAt!.getUTCHours()).toBe(8);
+    expect(projected.endAt!.getUTCMinutes()).toBe(30);
+  });
+
+  it('projects a null endAt as null', () => {
+    const projected = projectRecurringEvent({ ...duty, endAt: null }, d('2026-09-16'));
+    expect(projected.endAt).toBeNull();
   });
 });
 

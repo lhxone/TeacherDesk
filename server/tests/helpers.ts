@@ -18,7 +18,7 @@ export async function resetDb() {
       lottery_records, scores, exams, exam_sessions,
       seat_assignments, seating_charts,
       student_tags, tags, students,
-      events, schedule_slots, classes,
+      event_occurrences, events, schedule_slots, classes,
       refresh_tokens, users
     RESTART IDENTITY CASCADE;
   `);

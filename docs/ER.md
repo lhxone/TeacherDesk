@@ -16,6 +16,7 @@ erDiagram
     USERS ||--o{ CLASSES : "创建"
     USERS ||--o{ SCHEDULE_SLOTS : "创建"
     USERS ||--o{ EVENTS : "创建"
+    EVENTS ||--o{ EVENT_OCCURRENCES : "按周记录完成状态"
     USERS ||--o{ TAGS : "创建"
 
     CLASSES ||--o{ STUDENTS : "包含"
@@ -133,9 +134,19 @@ erDiagram
         timestamptz end_at
         boolean all_day
         boolean is_done
+        smallint repeat_weekday
         timestamptz created_at
         timestamptz updated_at
         timestamptz deleted_at
+    }
+
+    EVENT_OCCURRENCES {
+        uuid id PK
+        uuid event_id FK
+        date occurrence_date
+        boolean is_done
+        timestamptz created_at
+        timestamptz updated_at
     }
 
     SEATING_CHARTS {
@@ -320,9 +331,19 @@ erDiagram
 
 ---
 
-### 2.7 events — 待办 / 一次性事件
+### 2.7 events / event_occurrences — 待办（一次性 / 每周重复）
 
-`class_id` 可空（不关联具体班级的私人事项）。用于首页「今日待办」。
+`class_id` 可空（不关联具体班级的私人事项）。用于首页「今日待办」和日程表。
+
+`repeat_weekday` 非空（1=周一…7=周日）时该待办每周重复：`start_at`/`end_at` 只取其
+时间部分，从 `start_at` 所在周开始，此后每逢该星期几都会在日程表 agenda 中投影出一次
+（应用层完成，见 `lib/schedule.ts` 的 `recurringEventOccursOn`/`projectRecurringEvent`，
+与课程表 `slotOccursOn` 同一思路）。目前只支持每周重复，不支持单/双周或按月/年。
+
+普通一次性待办的完成状态就是 `events.is_done`。重复待办的完成状态**按周独立**：
+`event_occurrences` 是稀疏表，仅当某一周被从 `events.is_done` 的默认值改动过才会
+写入一行（`(event_id, occurrence_date)` 唯一），未记录的周沿用默认值——与
+`sent_reminders` 幂等台账同一设计模式。
 
 ---
 
@@ -476,6 +497,7 @@ users
  │   └─ grouping_plans.class_id
  ├─ schedule_slots.user_id
  ├─ events.user_id
+ │   └─ event_occurrences.event_id
  ├─ tags.user_id
  ├─ push_subscriptions.user_id
  ├─ sent_reminders.user_id
@@ -497,6 +519,7 @@ CREATE UNIQUE INDEX uq_students_no  ON students (class_id, student_no)
     WHERE student_no IS NOT NULL AND deleted_at IS NULL;
 CREATE INDEX idx_slots_user_day     ON schedule_slots (user_id, weekday) WHERE deleted_at IS NULL;
 CREATE INDEX idx_events_user_time   ON events (user_id, start_at) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX uq_event_occurrence ON event_occurrences (event_id, occurrence_date);
 CREATE UNIQUE INDEX uq_seat_cell    ON seat_assignments (seating_chart_id, row_index, col_index);
 CREATE UNIQUE INDEX uq_seat_student ON seat_assignments (seating_chart_id, student_id);
 CREATE UNIQUE INDEX uq_chart_active ON seating_charts (class_id) WHERE is_active AND deleted_at IS NULL;

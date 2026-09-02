@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
   // Alpine/musl images must name their engine target explicitly. Without this
   // the CLI mis-detects openssl, looks for a plain `linux-musl` engine that is
   // not vendored, and tries to download one at container start.
@@ -47,15 +47,15 @@ model User {
 // opted in. `endpoint` is unique so re-subscribing the same browser updates the
 // keys in place instead of piling up dead rows.
 model PushSubscription {
-  id        String   @id @default(uuid()) @db.Uuid
-  userId    String   @map("user_id") @db.Uuid
-  endpoint  String    @unique
-  p256dh    String   @db.VarChar(255)
-  auth      String   @db.VarChar(255)
-  userAgent String?  @map("user_agent") @db.VarChar(255)
-  label     String?  @db.VarChar(64)
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  endpoint   String    @unique
+  p256dh     String    @db.VarChar(255)
+  auth       String    @db.VarChar(255)
+  userAgent  String?   @map("user_agent") @db.VarChar(255)
+  label      String?   @db.VarChar(64)
   lastSeenAt DateTime? @map("last_seen_at") @db.Timestamptz(6)
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -200,24 +200,55 @@ model ScheduleSlot {
 }
 
 model Event {
-  id          String    @id @default(uuid()) @db.Uuid
-  userId      String    @map("user_id") @db.Uuid
-  classId     String?   @map("class_id") @db.Uuid
-  title       String    @db.VarChar(128)
-  description String?
-  startAt     DateTime  @map("start_at") @db.Timestamptz(6)
-  endAt       DateTime? @map("end_at") @db.Timestamptz(6)
-  allDay      Boolean   @default(false) @map("all_day")
-  isDone      Boolean   @default(false) @map("is_done")
-  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
-  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  classId       String?   @map("class_id") @db.Uuid
+  title         String    @db.VarChar(128)
+  description   String?
+  startAt       DateTime  @map("start_at") @db.Timestamptz(6)
+  endAt         DateTime? @map("end_at") @db.Timestamptz(6)
+  allDay        Boolean   @default(false) @map("all_day")
+  // For a non-recurring event (repeatWeekday null) this is the one and only
+  // completion flag. For a recurring one it's only the *template* default —
+  // each week's actual completion lives in EventOccurrence instead (a row
+  // only exists for a week that's been toggled away from that default; see
+  // EventOccurrence's doc comment).
+  isDone        Boolean   @default(false) @map("is_done")
+  // Non-null (1 = Monday … 7 = Sunday) makes this a weekly-recurring todo
+  // (e.g. "每周三值班"): startAt/endAt's time-of-day is reused every week from
+  // startAt's date onward, and each occurrence's completion is tracked
+  // independently via EventOccurrence.
+  repeatWeekday Int?      @map("repeat_weekday") @db.SmallInt
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz(6)
 
-  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  class Class? @relation(fields: [classId], references: [id], onDelete: SetNull)
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  class       Class?            @relation(fields: [classId], references: [id], onDelete: SetNull)
+  occurrences EventOccurrence[]
 
   @@index([userId, startAt])
   @@map("events")
+}
+
+// Per-week completion override for a recurring Event (repeatWeekday
+// non-null). Sparse by design, like SentReminder: a row exists only once a
+// given week's occurrence has been toggled away from the event's own isDone
+// default, so ticking one Wednesday doesn't touch any other week.
+model EventOccurrence {
+  id             String   @id @default(uuid()) @db.Uuid
+  eventId        String   @map("event_id") @db.Uuid
+  // The occurrence's local calendar date (matches AgendaDay.date), not a
+  // timestamp — one row per calendar day the recurring event lands on.
+  occurrenceDate DateTime @map("occurrence_date") @db.Date
+  isDone         Boolean  @default(false) @map("is_done")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, occurrenceDate])
+  @@map("event_occurrences")
 }
 
 model SeatingChart {

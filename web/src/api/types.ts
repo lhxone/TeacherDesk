@@ -163,6 +163,15 @@ export type EventItem = {
   classId: string | null;
   className?: string | null;
   classColor?: string | null;
+  /** 1 = Monday … 7 = Sunday. Non-null means this is a weekly-recurring todo. */
+  repeatWeekday: number | null;
+  /**
+   * Only set on agenda rows for a recurring event: the specific date this
+   * occurrence's isDone applies to (toggle via PATCH
+   * /events/{id}/occurrences/{occurrenceDate}, not the plain event PATCH).
+   * Null for non-recurring events and for the raw /events list endpoint.
+   */
+  occurrenceDate?: string | null;
 };
 
 export type SeatLayout = {
