@@ -454,7 +454,88 @@ erDiagram
 
 ---
 
-### 2.12 push_subscriptions — Web Push 订阅端点
+### 2.13 教学知识中心 (Knowledge Center)
+
+```mermaid
+erDiagram
+    USERS ||--o{ KNOWLEDGE_NODES : "创建"
+    USERS ||--o{ RESOURCE_COLLECTIONS : "创建"
+    USERS ||--o{ RESOURCES : "拥有"
+    KNOWLEDGE_NODES ||--o{ KNOWLEDGE_NODES : "父子"
+    RESOURCE_COLLECTIONS ||--o{ RESOURCE_COLLECTIONS : "父子"
+    RESOURCE_COLLECTIONS ||--o{ RESOURCES : "包含"
+    RESOURCES ||--o{ RESOURCE_CHUNKS : "解析出"
+    RESOURCES ||--o{ RESOURCE_TAGS : "被打标"
+    TAGS ||--o{ RESOURCE_TAGS : "标记"
+    RESOURCES ||--o{ RESOURCE_KNOWLEDGE_NODES : "关联"
+    KNOWLEDGE_NODES ||--o{ RESOURCE_KNOWLEDGE_NODES : "关联"
+
+    RESOURCES {
+        uuid id PK
+        uuid user_id FK
+        varchar type "textbook/ppt/lesson_plan/image/mistake/document/other"
+        varchar title
+        varchar subject
+        varchar grade
+        uuid collection_id FK
+        varchar original_filename
+        varchar mime_type
+        bigint file_size
+        varchar storage_path "相对 RESOURCE_STORAGE_ROOT 的路径，DB 不存文件内容"
+        varchar checksum "sha256"
+        varchar status "pending/parsing/ready/failed"
+        text parse_error
+        int page_count
+        boolean is_favorite
+        timestamptz last_used_at
+        jsonb metadata
+        timestamptz created_at
+        timestamptz updated_at
+        timestamptz deleted_at
+    }
+
+    RESOURCE_CHUNKS {
+        uuid id PK
+        uuid resource_id FK
+        int ordinal
+        int page_number "PPT/PDF 页码"
+        varchar section_label "Word 章节标题"
+        text content
+        timestamptz created_at
+    }
+
+    KNOWLEDGE_NODES {
+        uuid id PK
+        uuid user_id FK
+        uuid parent_id FK
+        varchar name
+        varchar subject
+        varchar grade
+        int sort_order
+        timestamptz deleted_at
+    }
+
+    RESOURCE_COLLECTIONS {
+        uuid id PK
+        uuid user_id FK
+        uuid parent_id FK
+        varchar name
+        int sort_order
+        timestamptz deleted_at
+    }
+```
+
+**设计要点**
+
+- `Resource` 是统一模型：`type` 区分教材/PPT/教案/图片/错题/文档/其他，具体解析行为在应用层按 `type`/`mimeType` 分支，而不是拆多张表。
+- 原始文件只存于磁盘（本地目录 / Docker Volume，见 `docs/DEPLOY.md`），路径记录在 `storage_path`（相对路径，不含绝对前缀，保证跨主机可移植）；PostgreSQL 只存元数据、解析文本与索引。
+- 上传后由后台任务（进程内 `setImmediate`，非独立微服务/队列）异步解析 PPT/Word/PDF 文本，按页（PPT/PDF）或章节（Word）拆成 `ResourceChunk`，`Resource.status` 经历 `pending → parsing → ready | failed`。图片等无法提取文本的类型直接进入 `ready`，为后续 OCR 预留 `metadata` 字段与该状态机。
+- 全文检索使用 **pg_trgm**（`CREATE EXTENSION pg_trgm` + `GIN(... gin_trgm_ops)` 索引），不是 `tsvector`：Postgres 内置文本搜索配置按 Unicode 词边界分词，会把一整段连续中文当成一个词元，子串检索完全失效；引入 zhparser 等中文分词扩展则需要自建 Postgres 镜像。pg_trgm 按字符三元组建索引，无需分词，中英文检索方式一致，且仍是 Postgres 内置能力（无 Elasticsearch/向量数据库）。
+- 搜索命中会返回具体匹配的 `ResourceChunk`（含 `page_number`/`section_label`），前端据此定位到 PPT 第几页或 Word 第几章。
+- `KnowledgeNode` 与 `ResourceCollection` 都是同一用户下的自引用树（`parent_id`），软删除时应用层会递归软删除整棵子树（DB 外键的 `Cascade`/`SetNull` 只在硬删除时生效）。
+- 面向未来扩展：`ResourceChunk` 是后续接入 pgvector `embedding` 列做 RAG 检索的自然单元；`Resource.type = 'mistake'` 搭配 `metadata` jsonb 可在题库/`QuestionAttempt` 阶段直接存题干、选项、答案，无需现在就迁移表结构。
+
+### 2.14 push_subscriptions — Web Push 订阅端点
 
 每个开启推送的浏览器 / PWA 一行。`endpoint` 唯一：同一浏览器重新订阅时按 `endpoint`
 upsert，既更新密钥，也把共享设备上前一位教师留下的行改归当前用户。推送服务返回

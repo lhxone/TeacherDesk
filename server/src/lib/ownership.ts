@@ -96,6 +96,30 @@ export async function requireRefreshTokenRow(id: string, userId: string) {
   return row;
 }
 
+export async function requireResource(resourceId: string, userId: string) {
+  const resource = await prisma.resource.findFirst({
+    where: { id: resourceId, userId, deletedAt: null },
+  });
+  if (!resource) throw ApiError.forbidden();
+  return resource;
+}
+
+export async function requireKnowledgeNode(nodeId: string, userId: string) {
+  const node = await prisma.knowledgeNode.findFirst({
+    where: { id: nodeId, userId, deletedAt: null },
+  });
+  if (!node) throw ApiError.forbidden();
+  return node;
+}
+
+export async function requireResourceCollection(collectionId: string, userId: string) {
+  const collection = await prisma.resourceCollection.findFirst({
+    where: { id: collectionId, userId, deletedAt: null },
+  });
+  if (!collection) throw ApiError.forbidden();
+  return collection;
+}
+
 /** Assert every id belongs to the given class (used by bulk seat/group writes). */
 export async function assertStudentsInClass(studentIds: string[], classId: string) {
   if (studentIds.length === 0) return;

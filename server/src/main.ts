@@ -2,9 +2,11 @@ import { buildApp } from './app.js';
 import { config, pushEnabled } from './config.js';
 import { prisma } from './db.js';
 import { startReminderScheduler, stopReminderScheduler } from './lib/reminder.js';
+import { setResourceParseLogger } from './lib/resourceParseJob.js';
 
 async function main() {
   const app = await buildApp();
+  setResourceParseLogger(app.log);
 
   const shutdown = async (signal: string) => {
     app.log.info(`${signal} received, shutting down`);

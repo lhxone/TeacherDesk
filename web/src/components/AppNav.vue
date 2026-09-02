@@ -6,12 +6,16 @@ import NavIcons from '@/components/icons/NavIcons.vue';
 const auth = useAuthStore();
 const router = useRouter();
 
-// Mobile bottom tabs mirror PRD §3.8: 首页 / 班级 / 课堂工具 / 成绩 / 我的
+// Mobile bottom tabs mirror PRD §3.8 (首页 / 班级 / 课堂工具 / 成绩 / 我的),
+// except the 4th slot is 知识中心 instead of 课堂工具 — 课堂工具 (抽签/分组/
+// 座位) is still one tap away from the home page's quick-links row, and desk
+// -bound tasks like browsing/uploading teaching resources benefit more from
+// a persistent bottom-tab slot on mobile.
 const links = [
   { name: 'home', label: '首页', icon: 'home' as const },
   { name: 'classes', label: '班级', icon: 'classes' as const },
   { name: 'schedule', label: '日程', icon: 'schedule' as const },
-  { name: 'tools', label: '课堂', icon: 'tools' as const },
+  { name: 'knowledge-center', label: '知识', icon: 'knowledge' as const },
   { name: 'settings', label: '我的', icon: 'settings' as const },
 ];
 

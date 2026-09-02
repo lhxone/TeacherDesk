@@ -81,6 +81,12 @@ services:
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@teacherdesk.app}
       LOCAL_TZ_OFFSET_MINUTES: ${LOCAL_TZ_OFFSET_MINUTES:-480}
+      RESOURCE_STORAGE_ROOT: /data/resources
+    volumes:
+      # 教学知识中心 original files (PPT/Word/PDF/images). Postgres only holds
+      # metadata/extracted text; the bytes live here so the volume can be
+      # backed up/moved independently of the database.
+      - resource-data:/data/resources
     networks:
       - internal
     depends_on:
@@ -121,3 +127,4 @@ networks:
 
 volumes:
   db-data:
+  resource-data:
