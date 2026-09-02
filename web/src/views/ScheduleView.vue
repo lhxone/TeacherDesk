@@ -362,12 +362,27 @@ function openEditEvent(e: EventItem) {
   showEventDialog.value = true;
 }
 
-async function toggleEvent(id: string, isDone: boolean) {
-  await api.patch(`/events/${id}`, { isDone });
-  const ev = agenda.value?.events.find((e) => e.id === id);
+/**
+ * Toggles a todo's completion. A recurring event's occurrences are
+ * independent (each week has its own completion), so those go through the
+ * per-occurrence endpoint keyed by date; a plain one-off event still uses
+ * the event's own isDone. Only the matching (id, occurrenceDate) pair in the
+ * local cache is updated — not every day this event id appears on — so
+ * ticking one Wednesday never flips another week's box in the UI before the
+ * next reload.
+ */
+async function toggleEvent(e: EventItem, isDone: boolean) {
+  if (e.repeatWeekday != null && e.occurrenceDate) {
+    await api.patch(`/events/${e.id}/occurrences/${e.occurrenceDate}`, { isDone });
+  } else {
+    await api.patch(`/events/${e.id}`, { isDone });
+  }
+
+  const matches = (x: EventItem) => x.id === e.id && x.occurrenceDate === e.occurrenceDate;
+  const ev = agenda.value?.events.find(matches);
   if (ev) ev.isDone = isDone;
   for (const d of weekAgenda.value) {
-    const we = d.events.find((e) => e.id === id);
+    const we = d.events.find(matches);
     if (we) we.isDone = isDone;
   }
 }
@@ -455,9 +470,10 @@ onMounted(async () => {
                 type="checkbox"
                 :checked="e.isDone"
                 @click.stop
-                @change="toggleEvent(e.id, ($event.target as HTMLInputElement).checked)"
+                @change="toggleEvent(e, ($event.target as HTMLInputElement).checked)"
               />
               <span class="todo-chip-text">{{ e.title }}</span>
+              <span v-if="e.repeatWeekday != null" class="badge">每周</span>
             </div>
             <button class="todo-add" title="新增待办" @click="openCreateEvent(weekAgenda.find((a) => a.weekday === d)?.date)">
               +
@@ -546,10 +562,13 @@ onMounted(async () => {
               type="checkbox"
               :checked="e.isDone"
               @click.stop
-              @change="toggleEvent(e.id, ($event.target as HTMLInputElement).checked)"
+              @change="toggleEvent(e, ($event.target as HTMLInputElement).checked)"
             />
             <div class="todo-block-text">
-              <div class="todo-block-title">{{ e.title }}</div>
+              <div class="todo-block-title">
+                {{ e.title }}
+                <span v-if="e.repeatWeekday != null" class="badge">每周</span>
+              </div>
               <div class="hint">{{ eventTimeLabel(e) }}</div>
             </div>
           </div>
@@ -615,12 +634,13 @@ onMounted(async () => {
             <input
               type="checkbox"
               :checked="e.isDone"
-              @change="toggleEvent(e.id, ($event.target as HTMLInputElement).checked)"
+              @change="toggleEvent(e, ($event.target as HTMLInputElement).checked)"
             />
             <span class="todo-title" :class="{ done: e.isDone }" @click="openEditEvent(e)">
               {{ e.title }}
             </span>
             <span class="hint">{{ eventTimeLabel(e) }}</span>
+            <span v-if="e.repeatWeekday != null" class="badge">每周</span>
             <span v-if="e.className" class="badge">{{ e.className }}</span>
             <div class="spacer" />
             <button class="btn btn-sm" @click="openEditEvent(e)">编辑</button>

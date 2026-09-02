@@ -9,6 +9,8 @@ import {
   dateRange,
   formatDate,
   isoWeekday,
+  projectRecurringEvent,
+  recurringEventOccursOn,
   slotOccursOn,
   weekParity,
 } from '../lib/schedule.js';
@@ -213,7 +215,7 @@ export async function registerScheduleRoutes(app: FastifyInstance) {
     const days = dateRange(from, to);
     if (days.length > 31) throw ApiError.validation('日期区间最长 31 天');
 
-    const [slots, events, user] = await Promise.all([
+    const [slots, events, recurringEvents, user] = await Promise.all([
       prisma.scheduleSlot.findMany({
         where: { userId, deletedAt: null },
         include: { class: { select: { name: true, color: true } } },
@@ -223,6 +225,7 @@ export async function registerScheduleRoutes(app: FastifyInstance) {
         where: {
           userId,
           deletedAt: null,
+          repeatWeekday: null,
           startAt: {
             gte: new Date(`${formatDate(from)}T00:00:00.000Z`),
             lte: new Date(`${formatDate(to)}T23:59:59.999Z`),
@@ -230,8 +233,39 @@ export async function registerScheduleRoutes(app: FastifyInstance) {
         },
         orderBy: { startAt: 'asc' },
       }),
+      // Weekly-recurring todos: not filtered by the requested range here —
+      // one could have started months ago and still recur into it — only
+      // that its first occurrence isn't after the end of the range. Each
+      // matching weekday within `days` gets projected below.
+      prisma.event.findMany({
+        where: {
+          userId,
+          deletedAt: null,
+          repeatWeekday: { not: null },
+          startAt: { lte: new Date(`${formatDate(to)}T23:59:59.999Z`) },
+        },
+      }),
       prisma.user.findFirstOrThrow({ where: { id: userId } }),
     ]);
+
+    // Per-week completion overrides for the recurring events found above,
+    // within the requested range — sparse (only weeks someone has toggled
+    // away from the event's own isDone default get a row; see
+    // EventOccurrence's doc comment).
+    const occurrences = recurringEvents.length
+      ? await prisma.eventOccurrence.findMany({
+          where: {
+            eventId: { in: recurringEvents.map((e) => e.id) },
+            occurrenceDate: {
+              gte: new Date(`${formatDate(from)}T00:00:00.000Z`),
+              lte: new Date(`${formatDate(to)}T00:00:00.000Z`),
+            },
+          },
+        })
+      : [];
+    const occurrenceIsDone = new Map(
+      occurrences.map((o) => [`${o.eventId}:${formatDate(o.occurrenceDate)}`, o.isDone]),
+    );
 
     const settings = { ...DEFAULT_SETTINGS, ...(user.settings as object) } as typeof DEFAULT_SETTINGS;
     const daySchedule: DayScheduleItem[] = settings.daySchedule?.length
@@ -293,23 +327,49 @@ export async function registerScheduleRoutes(app: FastifyInstance) {
           };
         });
 
+      const oneTimeEvents = events
+        .filter((e) => formatDate(e.startAt) === dayStr)
+        .map((e) => ({
+          id: e.id,
+          title: e.title,
+          startAt: e.startAt.toISOString(),
+          endAt: e.endAt?.toISOString() ?? null,
+          allDay: e.allDay,
+          isDone: e.isDone,
+          classId: e.classId,
+          repeatWeekday: e.repeatWeekday,
+          occurrenceDate: null as string | null,
+        }));
+
+      // Weekly-recurring todos occurring on this weekday get their
+      // startAt/endAt projected onto this date (see projectRecurringEvent);
+      // isDone comes from this week's EventOccurrence override if one
+      // exists, else the event's own isDone default.
+      const recurringOnDay = recurringEvents
+        .filter((e) => recurringEventOccursOn(e, day))
+        .map((e) => {
+          const projected = projectRecurringEvent(e, day);
+          const override = occurrenceIsDone.get(`${e.id}:${dayStr}`);
+          return {
+            id: e.id,
+            title: e.title,
+            startAt: projected.startAt.toISOString(),
+            endAt: projected.endAt?.toISOString() ?? null,
+            allDay: e.allDay,
+            isDone: override ?? e.isDone,
+            classId: e.classId,
+            repeatWeekday: e.repeatWeekday,
+            occurrenceDate: dayStr,
+          };
+        });
+
       return {
         date: dayStr,
         weekday: isoWeekday(day),
         weekParity: weekParity(day, termStart),
         lessons,
         timeline,
-        events: events
-          .filter((e) => formatDate(e.startAt) === dayStr)
-          .map((e) => ({
-            id: e.id,
-            title: e.title,
-            startAt: e.startAt.toISOString(),
-            endAt: e.endAt?.toISOString() ?? null,
-            allDay: e.allDay,
-            isDone: e.isDone,
-            classId: e.classId,
-          })),
+        events: [...oneTimeEvents, ...recurringOnDay].sort((a, b) => a.startAt.localeCompare(b.startAt)),
       };
     });
 

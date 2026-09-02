@@ -78,6 +78,54 @@ export function slotOccursOn(slot: SlotLike, date: Date): boolean {
   return rule === 'odd_week' ? parity === 'odd' : parity === 'even';
 }
 
+export type RecurringEventLike = {
+  startAt: Date;
+  endAt: Date | null;
+  repeatWeekday: number | null;
+};
+
+/**
+ * Whether a weekly-recurring event (repeatWeekday non-null) occurs on `date`
+ * — same weekday, and not before the event's own start date (its first
+ * occurrence). Non-recurring events (repeatWeekday null) are handled by a
+ * plain date-equality check at the call site instead, same as before.
+ */
+export function recurringEventOccursOn(event: RecurringEventLike, date: Date): boolean {
+  if (event.repeatWeekday == null) return false;
+  const day = toUtcDate(date);
+  if (isoWeekday(day) !== event.repeatWeekday) return false;
+  return day >= toUtcDate(event.startAt);
+}
+
+/**
+ * Projects a weekly-recurring event's stored startAt/endAt onto `date`: same
+ * date, but the wall-clock time-of-day (hours/minutes/seconds/ms) from the
+ * original instant — so a "每周三 09:00–10:00" todo created three weeks ago
+ * still shows 09:00–10:00 today, not the original date's timestamp.
+ */
+export function projectRecurringEvent(
+  event: { startAt: Date; endAt: Date | null },
+  date: Date,
+): { startAt: Date; endAt: Date | null } {
+  const day = toUtcDate(date);
+  const project = (instant: Date) =>
+    new Date(
+      Date.UTC(
+        day.getUTCFullYear(),
+        day.getUTCMonth(),
+        day.getUTCDate(),
+        instant.getUTCHours(),
+        instant.getUTCMinutes(),
+        instant.getUTCSeconds(),
+        instant.getUTCMilliseconds(),
+      ),
+    );
+  return {
+    startAt: project(event.startAt),
+    endAt: event.endAt ? project(event.endAt) : null,
+  };
+}
+
 /** Inclusive list of UTC dates between `from` and `to`. */
 export function dateRange(from: Date, to: Date): Date[] {
   const out: Date[] = [];

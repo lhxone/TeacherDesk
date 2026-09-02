@@ -13,7 +13,7 @@ import { prisma } from '../db.js';
 import { config } from '../config.js';
 import { DEFAULT_SETTINGS } from '../config.js';
 import { sendPushToUser } from './push.js';
-import { formatDate, slotOccursOn } from './schedule.js';
+import { formatDate, projectRecurringEvent, recurringEventOccursOn, slotOccursOn } from './schedule.js';
 import { lessonPeriodTimes } from './daySchedule.js';
 import { wallTimeToInstant as wallTimeToInstantTz, startOfLocalDay as startOfLocalDayTz } from './timezone.js';
 
@@ -38,7 +38,7 @@ export async function runReminderScan(now: Date = new Date()): Promise<number> {
       const lead = Math.max(1, settings.remindBeforeMinutes || DEFAULT_SETTINGS.remindBeforeMinutes);
       const windowEnd = new Date(now.getTime() + lead * 60_000);
       pushed += await remindLessons(user.id, settings, tz, now, windowEnd);
-      pushed += await remindTodos(user.id, now, windowEnd, lead);
+      pushed += await remindTodos(user.id, now, windowEnd, lead, tz);
     }
 
     // Independent of pushRemindersEnabled — the 放学 ping has its own toggle
@@ -115,20 +115,34 @@ async function remindLessons(
   return pushed;
 }
 
-async function remindTodos(userId: string, now: Date, windowEnd: Date, lead: number) {
-  const events = await prisma.event.findMany({
-    where: {
-      userId,
-      deletedAt: null,
-      isDone: false,
-      allDay: false,
-      startAt: { gte: now, lte: windowEnd },
-    },
-    include: { class: { select: { name: true } } },
-  });
+async function remindTodos(userId: string, now: Date, windowEnd: Date, lead: number, tz: string | null) {
+  const [oneTime, recurring] = await Promise.all([
+    prisma.event.findMany({
+      where: {
+        userId,
+        deletedAt: null,
+        repeatWeekday: null,
+        isDone: false,
+        allDay: false,
+        startAt: { gte: now, lte: windowEnd },
+      },
+      include: { class: { select: { name: true } } },
+    }),
+    prisma.event.findMany({
+      where: {
+        userId,
+        deletedAt: null,
+        repeatWeekday: { not: null },
+        allDay: false,
+        startAt: { lte: windowEnd },
+      },
+      include: { class: { select: { name: true } } },
+    }),
+  ]);
 
   let pushed = 0;
-  for (const ev of events) {
+
+  for (const ev of oneTime) {
     if (await alreadySent(userId, 'event', ev.id, ev.startAt)) continue;
     const mins = Math.round((ev.startAt.getTime() - now.getTime()) / 60_000);
     const delivered = await sendPushToUser(userId, {
@@ -140,6 +154,50 @@ async function remindTodos(userId: string, now: Date, windowEnd: Date, lead: num
     await markSent(userId, 'event', ev.id, ev.startAt);
     if (delivered > 0) pushed += 1;
   }
+
+  // A recurring todo can only start "soon" today or (just past midnight)
+  // tomorrow — same two-day window remindLessons uses — and needs
+  // projecting onto that day (see projectRecurringEvent) before its instant
+  // can be compared to [now, windowEnd]. Its per-week completion lives in
+  // EventOccurrence, not Event.isDone, so a done week is skipped here too.
+  if (recurring.length) {
+    const days = [
+      startOfLocalDayTz(now, tz, config.localTzOffsetMinutes),
+      startOfLocalDayTz(windowEnd, tz, config.localTzOffsetMinutes),
+    ];
+    const uniqueDays = [...new Map(days.map((d) => [d.getTime(), d])).values()];
+
+    for (const day of uniqueDays) {
+      const dueToday = recurring.filter((ev) => recurringEventOccursOn(ev, day));
+      if (!dueToday.length) continue;
+
+      const dayStr = formatDate(day);
+      const overrides = await prisma.eventOccurrence.findMany({
+        where: { eventId: { in: dueToday.map((e) => e.id) }, occurrenceDate: new Date(`${dayStr}T00:00:00.000Z`) },
+      });
+      const doneByEventId = new Map(overrides.map((o) => [o.eventId, o.isDone]));
+
+      for (const ev of dueToday) {
+        const isDone = doneByEventId.get(ev.id) ?? ev.isDone;
+        if (isDone) continue;
+
+        const { startAt: occursAt } = projectRecurringEvent(ev, day);
+        if (occursAt < now || occursAt > windowEnd) continue;
+        if (await alreadySent(userId, 'event', ev.id, occursAt)) continue;
+
+        const mins = Math.round((occursAt.getTime() - now.getTime()) / 60_000);
+        const delivered = await sendPushToUser(userId, {
+          title: `待办：${ev.title}`,
+          body: `${mins <= 0 ? '现在' : mins + ' 分钟后'}开始${ev.class?.name ? '（' + ev.class.name + '）' : ''}`,
+          tag: `event-${ev.id}-${dayStr}`,
+          url: '/',
+        }, scanLogger);
+        await markSent(userId, 'event', ev.id, occursAt);
+        if (delivered > 0) pushed += 1;
+      }
+    }
+  }
+
   void lead;
   return pushed;
 }

@@ -376,7 +376,12 @@ Query：`date=2026-09-14`（必填）或 `from=…&to=…`（区间，最长 31 
     ],
     "events": [{
       "id": "evt_…", "title": "收作业本", "startAt": "2026-09-14T09:00:00Z",
-      "allDay": false, "isDone": false, "classId": "cls_…"
+      "allDay": false, "isDone": false, "classId": "cls_…",
+      "repeatWeekday": null, "occurrenceDate": null
+    }, {
+      "id": "evt_…", "title": "值班", "startAt": "2026-09-16T08:00:00Z",
+      "endAt": "2026-09-16T08:30:00Z", "allDay": false, "isDone": false,
+      "classId": null, "repeatWeekday": 3, "occurrenceDate": "2026-09-16"
     }]
   }]
 }
@@ -387,17 +392,33 @@ Query：`date=2026-09-14`（必填）或 `from=…&to=…`（区间，最长 31 
 > `timeline` 按用户作息时间表（`settings.daySchedule`）逐时段展开、按 `start` 升序：
 > `kind: "activity"` 是眼操 / 午餐 / 午休 / 大课间等固定事件；`kind: "lesson"` 合并
 > 了当天该节次的排课（无排课时 `slotId` 等为 `null`）。`lessons` 仍保留供旧客户端使用。
+>
+> `events` 里每周重复待办（`repeatWeekday` 非空）已按当天投影好 `startAt`/`endAt`，
+> `occurrenceDate` 就是这一天，勾选完成请调用
+> `PATCH /events/{id}/occurrences/{occurrenceDate}`（见第 6 节）而非 `PATCH /events/{id}`，
+> 否则只会改到这条待办的默认完成值、不影响任何一周的展示。一次性待办
+> `occurrenceDate` 为 `null`，直接 `PATCH /events/{id}` 即可。
 
 ---
 
 ## 6. 待办 Events
 
+一次性待办和每周重复待办（如「每周三值班」）共用同一套接口：创建/编辑时传
+`repeatWeekday`（1=周一…7=周日，`null`/省略表示一次性）即可。重复待办的
+`startAt`/`endAt` 只有时间部分被复用，从 `startAt` 所在周开始每周投影一次，
+在 `GET /schedule/agenda`（见第 5 节）里按天展开；本接口的 `GET /events` 仍
+返回原始存储行，不做按周展开。
+
+重复待办的完成状态**按周独立**：不能通过 `PATCH /events/{id}` 的 `isDone`
+修改（会返回 `400`），必须用 `PATCH /events/{id}/occurrences/{date}`，见下表。
+
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/events` | Query：`from`、`to`、`classId`、`isDone`、分页 |
-| POST | `/events` | `{ "title", "description", "startAt", "endAt", "allDay", "classId" }` |
-| PATCH | `/events/{eventId}` | 更新，含 `{ "isDone": true }` 勾选完成 |
-| DELETE | `/events/{eventId}` | `204` |
+| GET | `/events` | Query：`from`、`to`、`classId`、`isDone`、分页；返回原始行，重复待办不展开 |
+| POST | `/events` | `{ "title", "description", "startAt", "endAt", "allDay", "classId", "repeatWeekday" }` |
+| PATCH | `/events/{eventId}` | 更新标题/时间等；一次性待办可用 `{ "isDone": true }` 勾选完成，重复待办这样做会 `400` |
+| PATCH | `/events/{eventId}/occurrences/{date}` | `{ "isDone": true }`，仅修改 `date`（`YYYY-MM-DD`）这一周的完成状态，其余周不受影响；仅限重复待办，`date` 应取 agenda 返回的 `occurrenceDate` |
+| DELETE | `/events/{eventId}` | `204`，级联删除该待办所有周的完成记录 |
 
 ---
 
@@ -893,7 +914,7 @@ Query：`format`（`csv` | `xlsx`，默认 `csv`）、`examIds`（逗号分隔�
 | Students | `GET|POST /classes/{id}/students`、`POST /classes/{id}/students/bulk-import`、`GET /classes/{id}/students/import-template`、`POST /classes/{id}/students/import-file`、`PATCH /classes/{id}/students/batch`、`GET|PATCH|DELETE /students/{id}` |
 | Tags | `GET|POST /tags`、`PATCH|DELETE /tags/{id}` |
 | Schedule | `GET|POST /schedule/slots`、`PATCH|DELETE /schedule/slots/{id}`、`GET /schedule/agenda` |
-| Events | `GET|POST /events`、`PATCH|DELETE /events/{id}` |
+| Events | `GET|POST /events`、`PATCH|DELETE /events/{id}`、`PATCH /events/{id}/occurrences/{date}` |
 | Seating | `GET|POST /classes/{id}/seating-charts`、`GET|PATCH|DELETE /seating-charts/{id}`、`PUT /seating-charts/{id}/assignments`、`POST /seating-charts/{id}/randomize` |
 | Tools | `POST /classes/{id}/lottery/draw`、`POST /classes/{id}/lottery/reset`、`GET /classes/{id}/lottery/records`、`POST /classes/{id}/grouping/generate`、`GET /classes/{id}/grouping/plans`、`GET|DELETE /grouping-plans/{id}` |
 | Exams | `GET|POST /classes/{id}/exam-sessions`、`GET|PATCH|DELETE /exam-sessions/{id}`、`POST /exam-sessions/{id}/exams`、`GET /classes/{id}/exams`（扁平）、`GET|PATCH|DELETE /exams/{id}` |

@@ -749,4 +749,100 @@ describe('schedule and events', () => {
 
     expect(res.json().data.isDone).toBe(true);
   });
+
+  it('projects a weekly-recurring todo onto every matching day in range', async () => {
+    // "每周三值班" starting Wednesday 2026-09-16, 08:00–08:30.
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/events',
+      headers: user.auth,
+      payload: {
+        title: '值班',
+        startAt: '2026-09-16T08:00:00.000Z',
+        endAt: '2026-09-16T08:30:00.000Z',
+        repeatWeekday: 3,
+      },
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/v1/schedule/agenda?from=2026-09-14&to=2026-09-24',
+      headers: user.auth,
+    });
+
+    const byDate = new Map(res.json().data.map((d: { date: string; events: unknown[] }) => [d.date, d.events]));
+    expect(byDate.get('2026-09-16')).toHaveLength(1);
+    expect(byDate.get('2026-09-23')).toHaveLength(1);
+    expect(byDate.get('2026-09-17')).toHaveLength(0);
+    // Earlier than the todo's own start date: no occurrence yet.
+    expect(byDate.get('2026-09-14')).toHaveLength(0);
+
+    const first = (byDate.get('2026-09-16') as { startAt: string; endAt: string }[])[0];
+    expect(first.startAt.slice(0, 10)).toBe('2026-09-16');
+    expect(first.startAt.slice(11, 16)).toBe('08:00');
+    expect(first.endAt.slice(11, 16)).toBe('08:30');
+  });
+
+  it('toggling one week of a recurring todo does not affect other weeks', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v1/events',
+      headers: user.auth,
+      payload: { title: '值班', startAt: '2026-09-16T08:00:00.000Z', repeatWeekday: 3 },
+    });
+    const eventId = created.json().data.id;
+
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/events/${eventId}/occurrences/2026-09-16`,
+      headers: user.auth,
+      payload: { isDone: true },
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/v1/schedule/agenda?from=2026-09-16&to=2026-09-23',
+      headers: user.auth,
+    });
+    const byDate = new Map(res.json().data.map((d: { date: string; events: { isDone: boolean }[] }) => [d.date, d.events]));
+
+    expect((byDate.get('2026-09-16') as { isDone: boolean }[])[0].isDone).toBe(true);
+    expect((byDate.get('2026-09-23') as { isDone: boolean }[])[0].isDone).toBe(false);
+  });
+
+  it('rejects toggling isDone on a recurring event via the plain PATCH endpoint', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v1/events',
+      headers: user.auth,
+      payload: { title: '值班', startAt: '2026-09-16T08:00:00.000Z', repeatWeekday: 3 },
+    });
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/events/${created.json().data.id}`,
+      headers: user.auth,
+      payload: { isDone: true },
+    });
+
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('rejects toggling an occurrence on a non-recurring event', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v1/events',
+      headers: user.auth,
+      payload: { title: '家长会', startAt: '2026-09-14T09:00:00.000Z' },
+    });
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/events/${created.json().data.id}/occurrences/2026-09-14`,
+      headers: user.auth,
+      payload: { isDone: true },
+    });
+
+    expect(res.statusCode).toBe(400);
+  });
 });

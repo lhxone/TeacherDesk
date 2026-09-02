@@ -18,6 +18,14 @@ const classStore = useClassStore();
 const error = ref('');
 const saving = ref(false);
 
+const WEEKDAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+
+/** ISO weekday (1 = Monday … 7 = Sunday) of a "YYYY-MM-DD" string. */
+function weekdayOf(dateStr: string): number {
+  const iso = new Date(`${dateStr}T00:00:00Z`).getUTCDay();
+  return iso === 0 ? 7 : iso;
+}
+
 const form = ref({
   title: '',
   description: '',
@@ -28,21 +36,26 @@ const form = ref({
   endTime: '',
   allDay: false,
   classId: '',
+  repeats: false,
+  repeatWeekday: weekdayOf(props.defaultDate ?? new Date().toISOString().slice(0, 10)),
 });
 
 /** Split the stored UTC instant into the local date/time the form edits. */
 function hydrate() {
   if (!props.event) {
+    const date = props.defaultDate ?? new Date().toISOString().slice(0, 10);
     form.value = {
       title: '',
       description: '',
-      date: props.defaultDate ?? new Date().toISOString().slice(0, 10),
+      date,
       time: '09:00',
       hasEnd: false,
       endDate: '',
       endTime: '',
       allDay: false,
       classId: '',
+      repeats: false,
+      repeatWeekday: weekdayOf(date),
     };
     return;
   }
@@ -53,17 +66,20 @@ function hydrate() {
   const toTime = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 
   const end = props.event.endAt ? new Date(props.event.endAt) : null;
+  const date = toDate(start);
 
   form.value = {
     title: props.event.title,
     description: props.event.description ?? '',
-    date: toDate(start),
+    date,
     time: toTime(start),
     hasEnd: !!end,
     endDate: end ? toDate(end) : '',
     endTime: end ? toTime(end) : '',
     allDay: props.event.allDay,
     classId: props.event.classId ?? '',
+    repeats: props.event.repeatWeekday != null,
+    repeatWeekday: props.event.repeatWeekday ?? weekdayOf(date),
   };
 }
 
@@ -109,6 +125,7 @@ async function save() {
       endAt,
       allDay: form.value.allDay,
       classId: form.value.classId || null,
+      repeatWeekday: form.value.repeats ? form.value.repeatWeekday : null,
     };
 
     if (props.event) {
@@ -187,6 +204,19 @@ async function remove() {
           <label>结束时间</label>
           <input v-model="form.endTime" class="input" type="time" :placeholder="form.time" />
         </div>
+      </div>
+
+      <label class="check">
+        <input v-model="form.repeats" type="checkbox" />
+        <span>每周重复（如每周三值班）</span>
+      </label>
+
+      <div v-if="form.repeats" class="field">
+        <label>重复星期</label>
+        <select v-model.number="form.repeatWeekday" class="select">
+          <option v-for="(w, i) in WEEKDAYS" :key="i" :value="i + 1">{{ w }}</option>
+        </select>
+        <p class="hint">从「日期」当周开始，此后每周该星期都会出现；每周的完成状态各自独立</p>
       </div>
 
       <div class="field">
