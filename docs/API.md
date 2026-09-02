@@ -793,7 +793,13 @@ Query：`classIds`（逗号分隔，必填）、`examName` 或 `examDate`、`sub
 
 ### GET /analytics/student/{studentId} — 学生维度分析
 
-Query：`subject`（可选，限定科目）、`limit`（默认 20）
+Query：`subject`（可选，限定科目；`__all__` 表示不过滤、返回全部科目混合）、`limit`（默认 20）
+
+不同科目满分、难度不同，`trend`/`summary` 混合多科目会让分数与名次趋势失真，因此
+`subject` 缺省时仍返回全部科目（兼容旧调用方），但响应新增 `subjects` 字段列出该生
+考过的全部科目（按最近考试日期排序），供前端做「默认选中最近一科、按科目分别查看」
+的选择器；`subject=__all__` 时显式请求全科目混合，用于"全科目对比"图表（前端按科目
+拆成多条折线，不再混成一条线）。
 
 ```json
 {
@@ -803,6 +809,7 @@ Query：`subject`（可选，限定科目）、`limit`（默认 20）
       "examCount": 6, "avgScore": 82.3, "bestScore": 94, "worstScore": 68,
       "avgRank": 12, "bestRank": 5, "stddev": 8.1
     },
+    "subjects": ["数学", "物理"],
     "trend": [{
       "examId": "exm_…", "examName": "第一次月考", "examDate": "2026-09-25",
       "subject": "数学", "score": 88, "fullScore": 100,

@@ -539,6 +539,44 @@ describe('analytics: student dimension', () => {
     expect(radar.map((r: { subject: string }) => r.subject).sort()).toEqual(['数学', '物理']);
     expect(radar.find((r: { subject: string }) => r.subject === '数学').zScore).toBeGreaterThan(0);
   });
+
+  it('lists distinct subjects and filters the trend to one subject', async () => {
+    const math = await createExam({ name: '数学月考', subject: '数学', examDate: '2026-09-01' });
+    const physics = await createExam({ name: '物理月考', subject: '物理', examDate: '2026-09-02' });
+
+    await putScores(math, [{ studentId: studentIds[0], score: 88 }]);
+    await putScores(physics, [{ studentId: studentIds[0], score: 76 }]);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/analytics/student/${studentIds[0]}?subject=数学`,
+      headers: user.auth,
+    });
+
+    const data = res.json().data;
+    expect(data.subjects.sort()).toEqual(['数学', '物理']);
+    // Filtered to just 数学: mixing subjects into one trend/rank line is
+    // misleading since full scores and difficulty differ across subjects.
+    expect(data.trend).toHaveLength(1);
+    expect(data.trend[0].subject).toBe('数学');
+    expect(data.summary.avgScore).toBe(88);
+  });
+
+  it('subject=__all__ returns every subject mixed, for the comparison chart', async () => {
+    const math = await createExam({ name: '数学月考', subject: '数学', examDate: '2026-09-01' });
+    const physics = await createExam({ name: '物理月考', subject: '物理', examDate: '2026-09-02' });
+
+    await putScores(math, [{ studentId: studentIds[0], score: 88 }]);
+    await putScores(physics, [{ studentId: studentIds[0], score: 76 }]);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/analytics/student/${studentIds[0]}?subject=__all__`,
+      headers: user.auth,
+    });
+
+    expect(res.json().data.trend).toHaveLength(2);
+  });
 });
 
 describe('exports', () => {
