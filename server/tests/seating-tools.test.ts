@@ -529,13 +529,13 @@ describe('grouping', () => {
   });
 
   it('AC-11: balances groups by a chosen exam\'s scores', async () => {
-    const exam = await app.inject({
+    const session = await app.inject({
       method: 'POST',
-      url: `/api/v1/classes/${classId}/exams`,
+      url: `/api/v1/classes/${classId}/exam-sessions`,
       headers: user.auth,
-      payload: { name: '月考', subject: '数学', examDate: '2026-09-25' },
+      payload: { name: '月考', examDate: '2026-09-25', subjects: [{ subject: '数学' }] },
     });
-    const examId = exam.json().data.id;
+    const examId = session.json().data.exams[0].id;
 
     await app.inject({
       method: 'PUT',

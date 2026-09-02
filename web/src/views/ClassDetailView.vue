@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { api, ApiError, fetchAllPages } from '@/api/client';
 import ModalDialog from '@/components/ModalDialog.vue';
 import EmptyState from '@/components/EmptyState.vue';
-import type { ClassItem, Envelope, Exam, Paged, Student, Tag } from '@/api/types';
+import type { ClassItem, Envelope, Exam, ExamSession, Paged, Student, Tag } from '@/api/types';
 
 const props = defineProps<{ classId: string }>();
 
@@ -12,7 +12,8 @@ const tab = ref<Tab>('students');
 
 const cls = ref<ClassItem | null>(null);
 const students = ref<Student[]>([]);
-const exams = ref<Exam[]>([]);
+const examSessions = ref<ExamSession[]>([]);
+const expandedSessions = ref<Set<string>>(new Set());
 const tags = ref<Tag[]>([]);
 const loading = ref(true);
 const search = ref('');
@@ -48,16 +49,23 @@ type ImportRow = {
   student: { name: string; studentNo: string | null };
 };
 
-// --- exam form ---
+// --- exam session form ---
+// A session groups one Exam row per subject (e.g. "第一次月考" → 语文/数学/英语),
+// created together and scored independently per subject.
 const showExamForm = ref(false);
-const editingExam = ref<Exam | null>(null);
+const editingSession = ref<ExamSession | null>(null);
 const examForm = ref({
   name: '',
-  subject: '',
-  examType: 'unit' as Exam['examType'],
+  examType: 'unit' as ExamSession['examType'],
   examDate: new Date().toISOString().slice(0, 10),
-  fullScore: 100,
+  subjects: [{ subject: '', fullScore: 100 }] as { subject: string; fullScore: number }[],
 });
+
+// --- single-subject exam edit (subject/fullScore only; name/type/date live
+// on the session) ---
+const showSubjectForm = ref(false);
+const editingExam = ref<Exam | null>(null);
+const subjectForm = ref({ subject: '', fullScore: 100 });
 
 const filteredStudents = computed(() => {
   const q = search.value.trim().toLowerCase();
@@ -78,8 +86,15 @@ async function loadStudents() {
 }
 
 async function loadExams() {
-  const res = await api.get<Paged<Exam>>(`/classes/${props.classId}/exams`, { pageSize: 100 });
-  exams.value = res.data;
+  const res = await api.get<Paged<ExamSession>>(`/classes/${props.classId}/exam-sessions`, {
+    pageSize: 100,
+  });
+  examSessions.value = res.data;
+}
+
+function toggleSession(id: string) {
+  if (expandedSessions.value.has(id)) expandedSessions.value.delete(id);
+  else expandedSessions.value.add(id);
 }
 
 async function loadTags() {
@@ -267,42 +282,58 @@ async function handleImportFileChange(e: Event) {
 }
 
 function openExamCreate() {
-  editingExam.value = null;
+  editingSession.value = null;
   examForm.value = {
     name: '',
-    subject: '',
     examType: 'unit',
     examDate: new Date().toISOString().slice(0, 10),
-    fullScore: 100,
+    subjects: [{ subject: cls.value?.subject ?? '', fullScore: 100 }],
   };
   error.value = '';
   showExamForm.value = true;
 }
 
-function openExamEdit(e: Exam) {
-  editingExam.value = e;
+function openSessionEdit(s: ExamSession) {
+  editingSession.value = s;
   examForm.value = {
-    name: e.name,
-    subject: e.subject ?? '',
-    examType: e.examType,
-    examDate: e.examDate,
-    fullScore: e.fullScore,
+    name: s.name,
+    examType: s.examType,
+    examDate: s.examDate,
+    // Subjects aren't editable here (each has its own scores) — only shown
+    // read-only for context; add/remove/rename a subject from the exam row.
+    subjects: s.exams.map((e) => ({ subject: e.subject ?? '', fullScore: e.fullScore })),
   };
   error.value = '';
   showExamForm.value = true;
+}
+
+function addSubjectRow() {
+  examForm.value.subjects.push({ subject: '', fullScore: 100 });
+}
+
+function removeSubjectRow(i: number) {
+  examForm.value.subjects.splice(i, 1);
 }
 
 async function saveExam() {
   error.value = '';
   try {
-    const payload = {
-      ...examForm.value,
-      subject: examForm.value.subject.trim() || cls.value?.subject || null,
-    };
-    if (editingExam.value) {
-      await api.patch(`/exams/${editingExam.value.id}`, payload);
+    if (editingSession.value) {
+      await api.patch(`/exam-sessions/${editingSession.value.id}`, {
+        name: examForm.value.name,
+        examType: examForm.value.examType,
+        examDate: examForm.value.examDate,
+      });
     } else {
-      await api.post(`/classes/${props.classId}/exams`, payload);
+      await api.post(`/classes/${props.classId}/exam-sessions`, {
+        name: examForm.value.name,
+        examType: examForm.value.examType,
+        examDate: examForm.value.examDate,
+        subjects: examForm.value.subjects.map((s) => ({
+          subject: s.subject.trim() || cls.value?.subject || null,
+          fullScore: s.fullScore,
+        })),
+      });
     }
     showExamForm.value = false;
     await loadExams();
@@ -311,10 +342,54 @@ async function saveExam() {
   }
 }
 
-async function removeExam(e: Exam) {
-  if (!confirm(`确定删除考试「${e.name}」吗？其成绩将一并删除。`)) return;
-  await api.del(`/exams/${e.id}`);
+async function removeSession(s: ExamSession) {
+  if (!confirm(`确定删除考试「${s.name}」吗？其所有科目及成绩将一并删除。`)) return;
+  await api.del(`/exam-sessions/${s.id}`);
   await loadExams();
+}
+
+function openSubjectAdd(s: ExamSession) {
+  editingSession.value = s;
+  editingExam.value = null;
+  subjectForm.value = { subject: '', fullScore: 100 };
+  error.value = '';
+  showSubjectForm.value = true;
+}
+
+function openSubjectEdit(e: Exam) {
+  editingExam.value = e;
+  subjectForm.value = { subject: e.subject ?? '', fullScore: e.fullScore };
+  error.value = '';
+  showSubjectForm.value = true;
+}
+
+async function saveSubject() {
+  error.value = '';
+  try {
+    const payload = {
+      subject: subjectForm.value.subject.trim() || cls.value?.subject || null,
+      fullScore: subjectForm.value.fullScore,
+    };
+    if (editingExam.value) {
+      await api.patch(`/exams/${editingExam.value.id}`, payload);
+    } else if (editingSession.value) {
+      await api.post(`/exam-sessions/${editingSession.value.id}/exams`, payload);
+    }
+    showSubjectForm.value = false;
+    await loadExams();
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.message : '保存失败';
+  }
+}
+
+async function removeExam(e: Exam) {
+  if (!confirm(`确定删除科目「${e.subject ?? e.name}」吗？其成绩将一并删除。`)) return;
+  try {
+    await api.del(`/exams/${e.id}`);
+    await loadExams();
+  } catch (err) {
+    error.value = err instanceof ApiError ? err.message : '删除失败';
+  }
 }
 
 function exportCsv(kind: 'scores' | 'students') {
@@ -380,7 +455,7 @@ watch(() => props.classId, loadAll);
           学生（{{ students.length }}）
         </button>
         <button :class="['tab-btn', { active: tab === 'exams' }]" @click="tab = 'exams'">
-          考试（{{ exams.length }}）
+          考试（{{ examSessions.length }}）
         </button>
       </nav>
 
@@ -473,7 +548,7 @@ watch(() => props.classId, loadAll);
           <button class="btn btn-primary" @click="openExamCreate">+ 新建考试</button>
         </div>
 
-        <EmptyState v-if="!exams.length" icon="exam" title="还没有考试记录">
+        <EmptyState v-if="!examSessions.length" icon="exam" title="还没有考试记录">
           新建考试后即可录入成绩并查看分析
         </EmptyState>
 
@@ -481,33 +556,73 @@ watch(() => props.classId, loadAll);
           <table>
             <thead>
               <tr>
+                <th style="width: 28px"></th>
                 <th>考试</th>
                 <th>科目</th>
                 <th>日期</th>
-                <th>录入进度</th>
-                <th>均分</th>
-                <th>及格率</th>
                 <th>操作</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="e in exams" :key="e.id">
-                <td>{{ e.name }}</td>
-                <td>{{ e.subject ?? '—' }}</td>
-                <td>{{ e.examDate }}</td>
-                <td>{{ e.entryProgress?.entered ?? 0 }} / {{ e.entryProgress?.total ?? 0 }}</td>
-                <td>{{ e.stats?.avg ?? '—' }}</td>
-                <td>
-                  {{ e.stats?.passRate != null ? Math.round(e.stats.passRate * 100) + '%' : '—' }}
-                </td>
-                <td>
-                  <RouterLink class="btn btn-sm" :to="{ name: 'score-entry', params: { examId: e.id } }">
-                    录入
-                  </RouterLink>
-                  <button class="btn btn-sm" @click="openExamEdit(e)">编辑</button>
-                  <button class="btn btn-sm btn-danger" @click="removeExam(e)">删除</button>
-                </td>
-              </tr>
+              <template v-for="s in examSessions" :key="s.id">
+                <tr class="session-row" @click="toggleSession(s.id)">
+                  <td>
+                    <span class="chevron" :class="{ open: expandedSessions.has(s.id) }">›</span>
+                  </td>
+                  <td>{{ s.name }}</td>
+                  <td>
+                    <span v-if="!s.exams.length" class="hint">—</span>
+                    <span v-for="e in s.exams" :key="e.id" class="badge">{{ e.subject ?? '未命名' }}</span>
+                  </td>
+                  <td>{{ s.examDate }}</td>
+                  <td>
+                    <button class="btn btn-sm" @click.stop="openSubjectAdd(s)">+ 科目</button>
+                    <button class="btn btn-sm" @click.stop="openSessionEdit(s)">编辑</button>
+                    <button class="btn btn-sm btn-danger" @click.stop="removeSession(s)">删除</button>
+                  </td>
+                </tr>
+                <tr v-if="expandedSessions.has(s.id)" class="subject-detail-row">
+                  <td></td>
+                  <td colspan="4">
+                    <EmptyState v-if="!s.exams.length" icon="exam" title="还没有科目">
+                      点击「+ 科目」添加
+                    </EmptyState>
+                    <table v-else class="subject-table">
+                      <thead>
+                        <tr>
+                          <th>科目</th>
+                          <th>满分</th>
+                          <th>录入进度</th>
+                          <th>均分</th>
+                          <th>及格率</th>
+                          <th>操作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="e in s.exams" :key="e.id">
+                          <td>{{ e.subject ?? '未命名' }}</td>
+                          <td>{{ e.fullScore }}</td>
+                          <td>{{ e.entryProgress?.entered ?? 0 }} / {{ e.entryProgress?.total ?? 0 }}</td>
+                          <td>{{ e.stats?.avg ?? '—' }}</td>
+                          <td>
+                            {{ e.stats?.passRate != null ? Math.round(e.stats.passRate * 100) + '%' : '—' }}
+                          </td>
+                          <td>
+                            <RouterLink
+                              class="btn btn-sm"
+                              :to="{ name: 'score-entry', params: { examId: e.id } }"
+                            >
+                              录入
+                            </RouterLink>
+                            <button class="btn btn-sm" @click="openSubjectEdit(e)">编辑</button>
+                            <button class="btn btn-sm btn-danger" @click="removeExam(e)">删除</button>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </td>
+                </tr>
+              </template>
             </tbody>
           </table>
         </div>
@@ -710,20 +825,16 @@ watch(() => props.classId, loadAll);
       </template>
     </ModalDialog>
 
-    <!-- Exam dialog -->
+    <!-- Exam session dialog -->
     <ModalDialog
       v-if="showExamForm"
-      :title="editingExam ? '编辑考试' : '新建考试'"
+      :title="editingSession ? '编辑考试' : '新建考试'"
       @close="showExamForm = false"
     >
       <form class="stack" @submit.prevent="saveExam">
         <div class="field">
           <label>考试名称</label>
           <input v-model="examForm.name" class="input" required placeholder="如：第一次月考" />
-        </div>
-        <div class="field">
-          <label>科目</label>
-          <input v-model="examForm.subject" class="input" :placeholder="cls?.subject ?? '如：数学'" />
         </div>
         <div class="field">
           <label>类型</label>
@@ -738,15 +849,64 @@ watch(() => props.classId, loadAll);
           <label>考试日期</label>
           <input v-model="examForm.examDate" class="input" type="date" required />
         </div>
-        <div class="field">
-          <label>满分</label>
-          <input v-model.number="examForm.fullScore" class="input" type="number" min="1" />
-        </div>
+
+        <template v-if="!editingSession">
+          <div class="field">
+            <label>科目（可添加多个，每个科目单独录入成绩）</label>
+            <div v-for="(row, i) in examForm.subjects" :key="i" class="row" style="margin-bottom: 6px">
+              <input v-model="row.subject" class="input" :placeholder="cls?.subject ?? '如：数学'" />
+              <input
+                v-model.number="row.fullScore"
+                class="input"
+                type="number"
+                min="1"
+                style="width: 90px"
+                placeholder="满分"
+              />
+              <button
+                v-if="examForm.subjects.length > 1"
+                type="button"
+                class="btn btn-sm btn-danger"
+                @click="removeSubjectRow(i)"
+              >
+                ×
+              </button>
+            </div>
+            <button type="button" class="btn btn-sm" @click="addSubjectRow">+ 添加科目</button>
+          </div>
+        </template>
+        <p v-else class="hint">
+          科目请在考试列表中「+ 科目」添加，或在展开行内编辑单个科目
+        </p>
+
         <p v-if="error" class="error-text">{{ error }}</p>
       </form>
       <template #footer>
         <button class="btn" @click="showExamForm = false">取消</button>
-        <button class="btn btn-primary" @click="saveExam">{{ editingExam ? '保存' : '创建' }}</button>
+        <button class="btn btn-primary" @click="saveExam">{{ editingSession ? '保存' : '创建' }}</button>
+      </template>
+    </ModalDialog>
+
+    <!-- Single-subject dialog: add a subject to a session, or edit one -->
+    <ModalDialog
+      v-if="showSubjectForm"
+      :title="editingExam ? '编辑科目' : '添加科目'"
+      @close="showSubjectForm = false"
+    >
+      <form class="stack" @submit.prevent="saveSubject">
+        <div class="field">
+          <label>科目</label>
+          <input v-model="subjectForm.subject" class="input" :placeholder="cls?.subject ?? '如：数学'" />
+        </div>
+        <div class="field">
+          <label>满分</label>
+          <input v-model.number="subjectForm.fullScore" class="input" type="number" min="1" />
+        </div>
+        <p v-if="error" class="error-text">{{ error }}</p>
+      </form>
+      <template #footer>
+        <button class="btn" @click="showSubjectForm = false">取消</button>
+        <button class="btn btn-primary" @click="saveSubject">{{ editingExam ? '保存' : '添加' }}</button>
       </template>
     </ModalDialog>
   </div>
@@ -775,4 +935,11 @@ tr.bad { background: #fef2f2; }
 
 .tag-picker { display: flex; flex-wrap: wrap; gap: 6px; }
 .tag-toggle { border: none; cursor: pointer; font: inherit; }
+
+.session-row { cursor: pointer; }
+.session-row:hover { background: var(--surface-hover, #f8fafc); }
+.chevron { display: inline-block; transition: transform 0.15s; color: var(--text-faint); }
+.chevron.open { transform: rotate(90deg); }
+.subject-detail-row td { background: #f8fafc; padding: 8px 8px 12px; }
+.subject-table { width: 100%; }
 </style>

@@ -23,6 +23,9 @@ const form = ref({
   description: '',
   date: props.defaultDate ?? new Date().toISOString().slice(0, 10),
   time: '09:00',
+  hasEnd: false,
+  endDate: '',
+  endTime: '',
   allDay: false,
   classId: '',
 });
@@ -35,6 +38,9 @@ function hydrate() {
       description: '',
       date: props.defaultDate ?? new Date().toISOString().slice(0, 10),
       time: '09:00',
+      hasEnd: false,
+      endDate: '',
+      endTime: '',
       allDay: false,
       classId: '',
     };
@@ -43,12 +49,19 @@ function hydrate() {
 
   const start = new Date(props.event.startAt);
   const pad = (n: number) => String(n).padStart(2, '0');
+  const toDate = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const toTime = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+  const end = props.event.endAt ? new Date(props.event.endAt) : null;
 
   form.value = {
     title: props.event.title,
     description: props.event.description ?? '',
-    date: `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}`,
-    time: `${pad(start.getHours())}:${pad(start.getMinutes())}`,
+    date: toDate(start),
+    time: toTime(start),
+    hasEnd: !!end,
+    endDate: end ? toDate(end) : '',
+    endTime: end ? toTime(end) : '',
     allDay: props.event.allDay,
     classId: props.event.classId ?? '',
   };
@@ -62,6 +75,16 @@ async function save() {
     return;
   }
 
+  if (form.value.hasEnd) {
+    const endDate = form.value.endDate || form.value.date;
+    const endTime = form.value.allDay ? '23:59' : form.value.endTime || form.value.time;
+    const startTime = form.value.allDay ? '00:00' : form.value.time;
+    if (`${endDate}T${endTime}` < `${form.value.date}T${startTime}`) {
+      error.value = '结束时间不能早于开始时间';
+      return;
+    }
+  }
+
   error.value = '';
   saving.value = true;
 
@@ -72,10 +95,18 @@ async function save() {
     const time = form.value.allDay ? '00:00' : form.value.time;
     const startAt = new Date(`${form.value.date}T${time}:00`).toISOString();
 
+    let endAt: string | null = null;
+    if (form.value.hasEnd) {
+      const endDate = form.value.endDate || form.value.date;
+      const endTime = form.value.allDay ? '23:59' : form.value.endTime || form.value.time;
+      endAt = new Date(`${endDate}T${endTime}:00`).toISOString();
+    }
+
     const payload = {
       title: form.value.title.trim(),
       description: form.value.description.trim() || null,
       startAt,
+      endAt,
       allDay: form.value.allDay,
       classId: form.value.classId || null,
     };
@@ -141,6 +172,22 @@ async function remove() {
         <input v-model="form.allDay" type="checkbox" />
         <span>全天事项（不指定具体时间）</span>
       </label>
+
+      <label class="check">
+        <input v-model="form.hasEnd" type="checkbox" />
+        <span>设置结束时间</span>
+      </label>
+
+      <div v-if="form.hasEnd" class="row">
+        <div class="field" style="flex: 1">
+          <label>结束日期</label>
+          <input v-model="form.endDate" class="input" type="date" :placeholder="form.date" />
+        </div>
+        <div v-if="!form.allDay" class="field" style="width: 120px">
+          <label>结束时间</label>
+          <input v-model="form.endTime" class="input" type="time" :placeholder="form.time" />
+        </div>
+      </div>
 
       <div class="field">
         <label>关联班级（可选）</label>

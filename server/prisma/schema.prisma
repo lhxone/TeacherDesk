@@ -114,6 +114,7 @@ model Class {
   scheduleSlots  ScheduleSlot[]
   events         Event[]
   seatingCharts  SeatingChart[]
+  examSessions   ExamSession[]
   exams          Exam[]
   lotteryRecords LotteryRecord[]
   groupingPlans  GroupingPlan[]
@@ -254,24 +255,49 @@ model SeatAssignment {
   @@map("seat_assignments")
 }
 
-model Exam {
-  id         String    @id @default(uuid()) @db.Uuid
-  classId    String    @map("class_id") @db.Uuid
-  name       String    @db.VarChar(64)
-  subject    String?   @db.VarChar(32)
-  examType   String    @default("daily") @map("exam_type") @db.VarChar(16)
-  examDate   DateTime  @map("exam_date") @db.Date
-  fullScore  Decimal   @default(100) @map("full_score") @db.Decimal(6, 2)
-  note       String?
-  statsCache Json?     @map("stats_cache")
-  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
-  deletedAt  DateTime? @map("deleted_at") @db.Timestamptz(6)
+// A single exam occasion (考试批次) that a class sits, e.g. "第一次月考". Groups
+// one or more per-subject Exam rows so the UI can create/list/manage the
+// whole occasion at once while scoring and analytics stay keyed on the
+// per-subject Exam as before.
+model ExamSession {
+  id        String    @id @default(uuid()) @db.Uuid
+  classId   String    @map("class_id") @db.Uuid
+  name      String    @db.VarChar(64)
+  examType  String    @default("daily") @map("exam_type") @db.VarChar(16)
+  examDate  DateTime  @map("exam_date") @db.Date
+  note      String?
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
 
-  class  Class   @relation(fields: [classId], references: [id], onDelete: Cascade)
-  scores Score[]
+  class Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+  exams Exam[]
 
   @@index([classId, examDate])
+  @@map("exam_sessions")
+}
+
+model Exam {
+  id            String    @id @default(uuid()) @db.Uuid
+  classId       String    @map("class_id") @db.Uuid
+  examSessionId String    @map("exam_session_id") @db.Uuid
+  name          String    @db.VarChar(64)
+  subject       String?   @db.VarChar(32)
+  examType      String    @default("daily") @map("exam_type") @db.VarChar(16)
+  examDate      DateTime  @map("exam_date") @db.Date
+  fullScore     Decimal   @default(100) @map("full_score") @db.Decimal(6, 2)
+  note          String?
+  statsCache    Json?     @map("stats_cache")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  class       Class       @relation(fields: [classId], references: [id], onDelete: Cascade)
+  examSession ExamSession @relation(fields: [examSessionId], references: [id], onDelete: Cascade)
+  scores      Score[]
+
+  @@index([classId, examDate])
+  @@index([examSessionId])
   @@map("exams")
 }
 

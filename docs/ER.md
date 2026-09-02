@@ -22,6 +22,7 @@ erDiagram
     CLASSES ||--o{ SCHEDULE_SLOTS : "被安排"
     CLASSES ||--o{ EVENTS : "关联"
     CLASSES ||--o{ SEATING_CHARTS : "拥有"
+    CLASSES ||--o{ EXAM_SESSIONS : "举行"
     CLASSES ||--o{ EXAMS : "举行"
     CLASSES ||--o{ LOTTERY_RECORDS : "发生"
     CLASSES ||--o{ GROUPING_PLANS : "拥有"
@@ -34,6 +35,7 @@ erDiagram
     STUDENTS ||--o{ GROUP_MEMBERS : "属于"
 
     SEATING_CHARTS ||--o{ SEAT_ASSIGNMENTS : "包含"
+    EXAM_SESSIONS  ||--o{ EXAMS : "包含（各科目）"
     EXAMS          ||--o{ SCORES : "包含"
     GROUPING_PLANS ||--o{ GROUPS : "包含"
     GROUPS         ||--o{ GROUP_MEMBERS : "包含"
@@ -158,9 +160,22 @@ erDiagram
         boolean is_pinned
     }
 
+    EXAM_SESSIONS {
+        uuid id PK
+        uuid class_id FK
+        varchar name
+        varchar exam_type
+        date exam_date
+        text note
+        timestamptz created_at
+        timestamptz updated_at
+        timestamptz deleted_at
+    }
+
     EXAMS {
         uuid id PK
         uuid class_id FK
+        uuid exam_session_id FK
         varchar name
         varchar subject
         varchar exam_type
@@ -344,14 +359,28 @@ erDiagram
 
 ---
 
-### 2.9 exams / scores — 考试与成绩
+### 2.9 exam_sessions / exams / scores — 考试与成绩
+
+一次考试（考试批次，如「第一次月考」）可覆盖多个科目：`exam_sessions` 存批次共享的
+名称/类型/日期/备注；每个科目是一条 `exams` 记录（`exam_session_id` 指回批次），独立
+录入成绩、独立统计，`name`/`exam_type`/`exam_date` 冗余自批次，便于按单个 `exam_id`
+查询而不必联查 `exam_sessions`（PATCH 批次时应用层级联同步这几个字段）。
+
+`exam_sessions`
+| 列 | 说明 |
+|---|---|
+| exam_type | `daily` / `unit` / `midterm` / `final` |
 
 `exams`
 | 列 | 说明 |
 |---|---|
-| exam_type | `daily` / `unit` / `midterm` / `final` |
+| exam_session_id | FK→exam_sessions，NOT NULL，ON DELETE CASCADE |
+| exam_type | `daily` / `unit` / `midterm` / `final`（冗余自批次） |
 | full_score | numeric(6,2)，默认 100 |
 | stats_cache | jsonb，成绩提交后写入的统计快照，读分析页时优先命中 |
+
+约束：删除 `exams` 行时若该批次已无其他科目会被应用层拒绝（`422`），需改为删除整个
+`exam_sessions`（级联软删除全部科目及成绩）。
 
 `stats_cache` 示例：
 
@@ -440,6 +469,8 @@ users
  │   │   ├─ scores.student_id
  │   │   └─ seat_assignments.student_id
  │   ├─ seating_charts.class_id
+ │   ├─ exam_sessions.class_id
+ │   │   └─ exams.exam_session_id
  │   ├─ exams.class_id
  │   ├─ lottery_records.class_id
  │   └─ grouping_plans.class_id
@@ -469,7 +500,9 @@ CREATE INDEX idx_events_user_time   ON events (user_id, start_at) WHERE deleted_
 CREATE UNIQUE INDEX uq_seat_cell    ON seat_assignments (seating_chart_id, row_index, col_index);
 CREATE UNIQUE INDEX uq_seat_student ON seat_assignments (seating_chart_id, student_id);
 CREATE UNIQUE INDEX uq_chart_active ON seating_charts (class_id) WHERE is_active AND deleted_at IS NULL;
+CREATE INDEX idx_sessions_class_date ON exam_sessions (class_id, exam_date DESC) WHERE deleted_at IS NULL;
 CREATE INDEX idx_exams_class_date   ON exams (class_id, exam_date DESC) WHERE deleted_at IS NULL;
+CREATE INDEX idx_exams_session      ON exams (exam_session_id);
 CREATE UNIQUE INDEX uq_score        ON scores (exam_id, student_id);
 CREATE INDEX idx_scores_student     ON scores (student_id);
 CREATE INDEX idx_lottery_class_time ON lottery_records (class_id, created_at DESC);

@@ -4,6 +4,7 @@
  */
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { generateInviteCode } from '../src/lib/auth.js';
 
 const prisma = new PrismaClient();
 
@@ -34,6 +35,7 @@ async function main() {
       email: EMAIL,
       passwordHash: await bcrypt.hash(PASSWORD, 10),
       displayName: '演示老师',
+      inviteCode: generateInviteCode(),
       settings: {
         periodsPerDay: 8,
         showWeekend: false,
@@ -123,9 +125,19 @@ async function main() {
       [classA, studentsA],
       [classB, studentsB],
     ] as const) {
+      const session = await prisma.examSession.create({
+        data: {
+          classId: cls.id,
+          name: spec.name,
+          examType: spec.type,
+          examDate: new Date(spec.date),
+        },
+      });
+
       const exam = await prisma.exam.create({
         data: {
           classId: cls.id,
+          examSessionId: session.id,
           name: spec.name,
           subject: '数学',
           examType: spec.type,

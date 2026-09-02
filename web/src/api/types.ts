@@ -210,6 +210,7 @@ export type SeatingChartDetail = {
 export type Exam = {
   id: string;
   classId: string;
+  examSessionId: string;
   name: string;
   subject: string | null;
   examType: 'daily' | 'unit' | 'midterm' | 'final';
@@ -218,6 +219,17 @@ export type Exam = {
   note: string | null;
   stats: ExamStats | null;
   entryProgress?: { entered: number; total: number };
+};
+
+/** One exam occasion (考试批次), e.g. "第一次月考", grouping one Exam per subject. */
+export type ExamSession = {
+  id: string;
+  classId: string;
+  name: string;
+  examType: 'daily' | 'unit' | 'midterm' | 'final';
+  examDate: string;
+  note: string | null;
+  exams: Exam[];
 };
 
 export type ExamStats = {
