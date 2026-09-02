@@ -41,7 +41,30 @@ export const resourcesApi = {
   remove: (id: string) => api.del(`/resources/${id}`),
   touch: (id: string) => api.post(`/resources/${id}/touch`),
   retry: (id: string) => api.post(`/resources/${id}/retry`),
+  // Not currently used for downloading (see `download()` below for why a
+  // plain navigation to this URL doesn't work) — kept for a future preview
+  // feature (e.g. embedding), which will need its own answer for auth on a
+  // plain <iframe src> the same way.
   downloadUrl: (id: string) => `/api/v1/resources/${id}/download`,
+
+  /**
+   * Fetch the file as a Blob and save it via a temporary <a download> link.
+   * A plain `window.open(downloadUrl)` does NOT work here: that's a normal
+   * browser navigation, which never attaches the Authorization header the
+   * API requires (only fetch/XHR calls do that), so the new tab just shows
+   * a 401 JSON error instead of downloading anything.
+   */
+  async download(id: string, filename: string): Promise<void> {
+    const blob = await api.blob(`/resources/${id}/download`);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
 
   /**
    * Multipart upload. Uses fetch directly (not api.upload, which is fixed to

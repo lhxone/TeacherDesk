@@ -108,7 +108,7 @@ async function toggleFavorite(r: Resource) {
 
 async function openFile(r: Resource) {
   await resourcesApi.touch(r.id);
-  window.open(resourcesApi.downloadUrl(r.id), '_blank');
+  await resourcesApi.download(r.id, r.originalFilename);
 }
 
 async function removeResource(r: Resource) {
@@ -238,7 +238,13 @@ onMounted(() => {
       <div class="stack">
         <div class="row">
           <span class="badge">{{ RESOURCE_TYPE_LABELS[detail.type] }}</span>
-          <span class="badge">{{ RESOURCE_STATUS_LABELS[detail.status] }}</span>
+          <span
+            v-if="detail.status !== 'ready'"
+            class="badge"
+            :class="{ 'badge-warn': detail.status === 'parsing' || detail.status === 'pending', 'badge-danger': detail.status === 'failed' }"
+          >
+            {{ RESOURCE_STATUS_LABELS[detail.status] }}
+          </span>
           <span class="hint">{{ detail.originalFilename }} · {{ formatSize(detail.fileSize) }}</span>
         </div>
 
