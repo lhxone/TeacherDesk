@@ -251,11 +251,21 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
 
     const student = await requireStudent(studentId, userId);
 
+    // Distinct subjects this student has scores for, so the client can offer
+    // a subject picker without a second round-trip. Independent of q.subject
+    // / q.limit — always reflects everything the student has ever sat.
+    const allExams = await prisma.exam.findMany({
+      where: { classId: student.classId, deletedAt: null, scores: { some: { studentId } } },
+      orderBy: { examDate: 'desc' },
+      select: { subject: true },
+    });
+    const subjects = [...new Set(allExams.map((e) => e.subject).filter((s): s is string => s !== null))];
+
     const exams = await prisma.exam.findMany({
       where: {
         classId: student.classId,
         deletedAt: null,
-        ...(q.subject ? { subject: q.subject } : {}),
+        ...(q.subject === '__all__' ? {} : q.subject ? { subject: q.subject } : {}),
         scores: { some: { studentId } },
       },
       orderBy: { examDate: 'asc' },
@@ -323,6 +333,7 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
           avgRank: ranks.length ? Math.round(ranks.reduce((a, b) => a + b, 0) / ranks.length) : null,
           bestRank: ranks.length ? Math.min(...ranks) : null,
         },
+        subjects,
         trend,
         subjectRadar: [...latestBySubject.entries()].map(([subject, t]) => ({
           subject,

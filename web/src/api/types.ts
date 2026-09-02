@@ -306,6 +306,8 @@ export type StudentAnalytics = {
     avgRank: number | null;
     bestRank: number | null;
   };
+  /** Distinct subjects this student has scores for, for the subject picker. */
+  subjects: string[];
   trend: {
     examId: string;
     examName: string;
