@@ -44,6 +44,15 @@ export async function requireExam(examId: string, userId: string) {
   return exam;
 }
 
+export async function requireExamSession(examSessionId: string, userId: string) {
+  const session = await prisma.examSession.findFirst({
+    where: { id: examSessionId, deletedAt: null, class: { userId, deletedAt: null } },
+    include: { class: true },
+  });
+  if (!session) throw ApiError.forbidden();
+  return session;
+}
+
 export async function requireTag(tagId: string, userId: string) {
   const tag = await prisma.tag.findFirst({ where: { id: tagId, userId } });
   if (!tag) throw ApiError.forbidden();

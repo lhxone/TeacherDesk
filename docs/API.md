@@ -572,29 +572,75 @@ Query：`from`、`to`、分页。响应含每个学生被抽中次数的汇总�
 
 ## 9. 考试 Exams
 
-### GET /classes/{classId}/exams — 考试列表
+一次考试（考试批次，`exam_sessions`，如「第一次月考」）可包含多个科目，每个科目是一条
+`exams` 记录，独立录入成绩、独立统计（`stats_cache`）。`exam_sessions` 只承载
+名称/类型/日期/备注这些共享属性；科目的增删、满分、成绩录入都作用在 `exams` 记录上。
 
-Query：`subject`、`examType`、`from`、`to`、分页、`sort`（默认 `-examDate`）
+### GET /classes/{classId}/exam-sessions — 考试列表（按批次分组）
+
+Query：`examType`、`from`、`to`、分页
 
 响应：
 
 ```json
 {
   "data": [{
-    "id": "exm_…", "classId": "cls_…", "name": "第一次月考",
-    "subject": "数学", "examType": "midterm", "examDate": "2026-09-25",
-    "fullScore": 100, "note": "",
-    "entryProgress": { "entered": 46, "total": 48 },
-    "stats": { "avg": 78.4, "max": 98, "min": 41, "passRate": 0.875 }
+    "id": "exs_…", "classId": "cls_…", "name": "第一次月考",
+    "examType": "midterm", "examDate": "2026-09-25", "note": "",
+    "exams": [
+      {
+        "id": "exm_…", "classId": "cls_…", "examSessionId": "exs_…",
+        "name": "第一次月考", "subject": "语文", "examType": "midterm",
+        "examDate": "2026-09-25", "fullScore": 120, "note": "",
+        "entryProgress": { "entered": 46, "total": 48 },
+        "stats": { "avg": 78.4, "max": 98, "min": 41, "passRate": 0.875 }
+      },
+      { "id": "exm_…", "subject": "数学", "fullScore": 150, "…": "…" }
+    ]
   }],
   "meta": { "page": 1, "pageSize": 20, "total": 6, "totalPages": 1 }
 }
 ```
 
-### POST /classes/{classId}/exams — 新建考试
-`{ "name": "第一次月考", "subject": "数学", "examType": "midterm", "examDate": "2026-09-25", "fullScore": 100, "note": "" }`
+### POST /classes/{classId}/exam-sessions — 新建考试（一次创建多个科目）
 
-### GET /exams/{examId} / PATCH /exams/{examId} / DELETE /exams/{examId}
+```json
+{
+  "name": "第一次月考", "examType": "midterm", "examDate": "2026-09-25", "note": "",
+  "subjects": [
+    { "subject": "语文", "fullScore": 120 },
+    { "subject": "数学", "fullScore": 150 },
+    { "subject": "英语", "fullScore": 120 }
+  ]
+}
+```
+
+`subjects` 至少 1 项；每项生成一条 `exams` 记录，`name`/`examType`/`examDate` 继承自批次。
+
+### GET /exam-sessions/{examSessionId} / PATCH /exam-sessions/{examSessionId} / DELETE /exam-sessions/{examSessionId}
+
+PATCH 只接受 `name`/`examType`/`examDate`/`note`；改动 `name`/`examType`/`examDate` 会级联更新到该批次下所有科目的
+`exams` 记录（它们冗余存了这几个字段，供成绩录入/分析按单个 `examId` 查询而不必联查批次）。
+DELETE 级联软删除批次下所有科目及其成绩。
+
+### POST /exam-sessions/{examSessionId}/exams — 给已有考试批次添加一个科目
+`{ "subject": "英语", "fullScore": 120, "note": "" }`
+
+### GET /classes/{classId}/exams — 考试列表（按科目，扁平）
+
+供分析页（按单个 `examId` 查询）和分组工具（「按上次考试成绩均衡分组」）使用，形状与旧版一致，
+不再需要即可按批次分组查看。Query：`subject`、`examType`、`from`、`to`、分页。
+
+### GET /exams/{examId}
+
+### PATCH /exams/{examId} — 编辑单个科目
+
+只接受 `subject`/`fullScore`/`note`；考试名称/类型/日期请通过 PATCH `/exam-sessions/{id}` 修改。
+
+### DELETE /exams/{examId} — 删除单个科目
+
+删除该科目及其成绩。若这是该批次最后一个科目，返回 `422 BUSINESS_RULE_VIOLATION`
+（请改用 `DELETE /exam-sessions/{id}` 删除整场考试）。
 
 ---
 
@@ -850,7 +896,7 @@ Query：`format`（`csv` | `xlsx`，默认 `csv`）、`examIds`（逗号分隔�
 | Events | `GET|POST /events`、`PATCH|DELETE /events/{id}` |
 | Seating | `GET|POST /classes/{id}/seating-charts`、`GET|PATCH|DELETE /seating-charts/{id}`、`PUT /seating-charts/{id}/assignments`、`POST /seating-charts/{id}/randomize` |
 | Tools | `POST /classes/{id}/lottery/draw`、`POST /classes/{id}/lottery/reset`、`GET /classes/{id}/lottery/records`、`POST /classes/{id}/grouping/generate`、`GET /classes/{id}/grouping/plans`、`GET|DELETE /grouping-plans/{id}` |
-| Exams | `GET|POST /classes/{id}/exams`、`GET|PATCH|DELETE /exams/{id}` |
+| Exams | `GET|POST /classes/{id}/exam-sessions`、`GET|PATCH|DELETE /exam-sessions/{id}`、`POST /exam-sessions/{id}/exams`、`GET /classes/{id}/exams`（扁平）、`GET|PATCH|DELETE /exams/{id}` |
 | Scores | `GET|PUT /exams/{id}/scores`、`PATCH /exams/{id}/scores/{studentId}`、`GET /exams/{id}/scores/template`、`POST /exams/{id}/scores/import-file` |
 | Analytics | `GET /analytics/class/{id}/exam/{examId}`、`GET /analytics/class/{id}/trend`、`GET /analytics/class/compare`、`GET /analytics/student/{id}` |
 | Export | `GET /exports/class/{id}/scores`、`GET /exports/class/{id}/students` |

@@ -173,13 +173,13 @@ describe('isolation: tags', () => {
 describe('isolation: exams and scores', () => {
   it('refuses to read a foreign exam\'s score sheet', async () => {
     const classId = await createClass(app, alice);
-    const exam = await app.inject({
+    const session = await app.inject({
       method: 'POST',
-      url: `/api/v1/classes/${classId}/exams`,
+      url: `/api/v1/classes/${classId}/exam-sessions`,
       headers: alice.auth,
-      payload: { name: '月考', examDate: '2026-09-25', subject: '数学' },
+      payload: { name: '月考', examDate: '2026-09-25', subjects: [{ subject: '数学' }] },
     });
-    const examId = exam.json().data.id;
+    const examId = session.json().data.exams[0].id;
 
     const res = await app.inject({
       method: 'GET',
@@ -192,16 +192,16 @@ describe('isolation: exams and scores', () => {
   it('refuses to write scores into a foreign exam', async () => {
     const classId = await createClass(app, alice);
     const [studentId] = await createStudents(app, alice, classId, [{ name: '张三' }]);
-    const exam = await app.inject({
+    const session = await app.inject({
       method: 'POST',
-      url: `/api/v1/classes/${classId}/exams`,
+      url: `/api/v1/classes/${classId}/exam-sessions`,
       headers: alice.auth,
-      payload: { name: '月考', examDate: '2026-09-25' },
+      payload: { name: '月考', examDate: '2026-09-25', subjects: [{}] },
     });
 
     const res = await app.inject({
       method: 'PUT',
-      url: `/api/v1/exams/${exam.json().data.id}/scores`,
+      url: `/api/v1/exams/${session.json().data.exams[0].id}/scores`,
       headers: bob.auth,
       payload: { scores: [{ studentId, score: 100 }] },
     });
@@ -215,16 +215,16 @@ describe('isolation: exams and scores', () => {
     const otherClass = await createClass(app, alice, { name: '另一个班' });
     const [outsider] = await createStudents(app, alice, otherClass, [{ name: '外班学生' }]);
 
-    const exam = await app.inject({
+    const session = await app.inject({
       method: 'POST',
-      url: `/api/v1/classes/${aliceClass}/exams`,
+      url: `/api/v1/classes/${aliceClass}/exam-sessions`,
       headers: alice.auth,
-      payload: { name: '月考', examDate: '2026-09-25' },
+      payload: { name: '月考', examDate: '2026-09-25', subjects: [{}] },
     });
 
     const res = await app.inject({
       method: 'PUT',
-      url: `/api/v1/exams/${exam.json().data.id}/scores`,
+      url: `/api/v1/exams/${session.json().data.exams[0].id}/scores`,
       headers: alice.auth,
       payload: { scores: [{ studentId: outsider, score: 90 }] },
     });

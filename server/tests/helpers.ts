@@ -15,7 +15,7 @@ export async function resetDb() {
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
       group_members, groups, grouping_plans,
-      lottery_records, scores, exams,
+      lottery_records, scores, exams, exam_sessions,
       seat_assignments, seating_charts,
       student_tags, tags, students,
       events, schedule_slots, classes,

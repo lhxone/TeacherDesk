@@ -27,14 +27,20 @@ let classId: string;
 let studentIds: string[];
 
 async function createExam(overrides: Record<string, unknown> = {}): Promise<string> {
+  const { subject = '数学', fullScore, ...sessionOverrides } = overrides;
   const res = await app.inject({
     method: 'POST',
-    url: `/api/v1/classes/${classId}/exams`,
+    url: `/api/v1/classes/${classId}/exam-sessions`,
     headers: user.auth,
-    payload: { name: '月考', subject: '数学', examDate: '2026-09-25', ...overrides },
+    payload: {
+      name: '月考',
+      examDate: '2026-09-25',
+      ...sessionOverrides,
+      subjects: [{ subject, ...(fullScore !== undefined ? { fullScore } : {}) }],
+    },
   });
   if (res.statusCode !== 201) throw new Error(res.body);
-  return res.json().data.id;
+  return res.json().data.exams[0].id;
 }
 
 async function putScores(
@@ -371,13 +377,17 @@ describe('analytics: class dimension', () => {
 
     const theirs = await app.inject({
       method: 'POST',
-      url: `/api/v1/classes/${other}/exams`,
+      url: `/api/v1/classes/${other}/exam-sessions`,
       headers: user.auth,
-      payload: { name: '统考', subject: '数学', examDate: '2026-09-25' },
+      payload: {
+        name: '统考',
+        examDate: '2026-09-25',
+        subjects: [{ subject: '数学' }],
+      },
     });
     await app.inject({
       method: 'PUT',
-      url: `/api/v1/exams/${theirs.json().data.id}/scores`,
+      url: `/api/v1/exams/${theirs.json().data.exams[0].id}/scores`,
       headers: user.auth,
       payload: { scores: [{ studentId: otherStudents[0], score: 90 }] },
     });
