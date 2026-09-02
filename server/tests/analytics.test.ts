@@ -368,6 +368,40 @@ describe('analytics: class dimension', () => {
     expect(series[1].avg).toBe(90);
   });
 
+  it('filters the trend by subject, leaving other subjects off the series', async () => {
+    const math = await createExam({ name: '数学月考', subject: '数学', examDate: '2026-09-01' });
+    const chinese = await createExam({ name: '语文月考', subject: '语文', examDate: '2026-09-02' });
+    await putScores(math, [{ studentId: studentIds[0], score: 80 }]);
+    await putScores(chinese, [{ studentId: studentIds[0], score: 70 }]);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/analytics/class/${classId}/trend?subject=${encodeURIComponent('数学')}`,
+      headers: user.auth,
+    });
+
+    const series = res.json().data.series;
+    expect(series).toHaveLength(1);
+    expect(series[0].examName).toBe('数学月考');
+  });
+
+  it('subject=__none__ matches only exams with no subject set', async () => {
+    const noSubject = await createExam({ name: '临时测验', subject: null, examDate: '2026-09-01' });
+    const math = await createExam({ name: '数学月考', subject: '数学', examDate: '2026-09-02' });
+    await putScores(noSubject, [{ studentId: studentIds[0], score: 50 }]);
+    await putScores(math, [{ studentId: studentIds[0], score: 80 }]);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/analytics/class/${classId}/trend?subject=__none__`,
+      headers: user.auth,
+    });
+
+    const series = res.json().data.series;
+    expect(series).toHaveLength(1);
+    expect(series[0].examName).toBe('临时测验');
+  });
+
   it('compares two classes on the same exam', async () => {
     const other = await createClass(app, user, { name: '高二(5)班' });
     const otherStudents = await createStudents(app, user, other, [{ name: '外班A' }]);

@@ -760,6 +760,9 @@ Query：`bucketSize`（分数分桶宽度，默认 10）
 
 Query：`subject`、`examType`、`from`、`to`、`limit`（默认 20）
 
+`subject` 缺省表示不按科目过滤（跨科目混合返回，慎用）；传具体科目名精确匹配；
+传字面量 `__none__` 精确匹配 `subject` 为空的考试（因为空字符串会被当作"不过滤"）。
+
 ```json
 {
   "data": {

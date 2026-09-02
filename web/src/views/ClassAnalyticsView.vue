@@ -3,16 +3,24 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { api } from '@/api/client';
 import EChart from '@/components/EChart.vue';
 import EmptyState from '@/components/EmptyState.vue';
-import type { ClassExamAnalytics, Envelope, Exam, Paged, TrendPoint } from '@/api/types';
+import type { ClassExamAnalytics, Envelope, ExamSession, Paged, TrendPoint } from '@/api/types';
 
 const props = defineProps<{ classId: string }>();
 
-const exams = ref<Exam[]>([]);
+// Two-level pick: an exam session (考试批次, e.g. "第一次月考") groups one Exam
+// per subject, so the analysis target is (session, subject) — not just an
+// exam id — to keep "which batch, which subject" visible throughout.
+const sessions = ref<ExamSession[]>([]);
+const selectedSessionId = ref<string>('');
 const selectedExamId = ref<string>('');
 const analysis = ref<ClassExamAnalytics | null>(null);
 const trend = ref<TrendPoint[]>([]);
 const loading = ref(true);
 const bucketSize = ref(10);
+
+const selectedSession = computed(() => sessions.value.find((s) => s.id === selectedSessionId.value) ?? null);
+const subjectsInSession = computed(() => selectedSession.value?.exams ?? []);
+const selectedExam = computed(() => subjectsInSession.value.find((e) => e.id === selectedExamId.value) ?? null);
 
 const PALETTE = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
 
@@ -96,10 +104,21 @@ const trendOption = computed<Record<string, unknown>>(() => ({
   ],
 }));
 
-async function loadExams() {
-  const res = await api.get<Paged<Exam>>(`/classes/${props.classId}/exams`, { pageSize: 100 });
-  exams.value = res.data;
-  if (!selectedExamId.value && exams.value.length) selectedExamId.value = exams.value[0].id;
+async function loadSessions() {
+  const res = await api.get<Paged<ExamSession>>(`/classes/${props.classId}/exam-sessions`, {
+    pageSize: 100,
+  });
+  sessions.value = res.data;
+  if (!selectedSessionId.value && sessions.value.length) {
+    selectedSessionId.value = sessions.value[0].id;
+  }
+}
+
+/** Picking a session resets the subject pick to that session's first subject
+ * (sessions aren't guaranteed to share subjects, so keeping the old
+ * selectedExamId across a session change would silently point nowhere). */
+function onSessionChange() {
+  selectedExamId.value = subjectsInSession.value[0]?.id ?? '';
 }
 
 async function loadAnalysis() {
@@ -115,8 +134,17 @@ async function loadAnalysis() {
 }
 
 async function loadTrend() {
+  // Scoped to the selected subject — otherwise different subjects' exams
+  // (different full scores, different papers) would plot on one timeline.
+  // __none__ asks the API for exams with no subject set, since an empty
+  // string would otherwise be read as "don't filter" (see analytics.ts).
+  if (!selectedExam.value) {
+    trend.value = [];
+    return;
+  }
   const res = await api.get<Envelope<{ series: TrendPoint[] }>>(
     `/analytics/class/${props.classId}/trend`,
+    { subject: selectedExam.value.subject ?? '__none__' },
   );
   trend.value = res.data.series;
 }
@@ -124,14 +152,23 @@ async function loadTrend() {
 onMounted(async () => {
   loading.value = true;
   try {
-    await loadExams();
+    await loadSessions();
+    if (!selectedExamId.value) selectedExamId.value = subjectsInSession.value[0]?.id ?? '';
     await Promise.all([loadAnalysis(), loadTrend()]);
   } finally {
     loading.value = false;
   }
 });
 
-watch([selectedExamId, bucketSize], loadAnalysis);
+watch(bucketSize, loadAnalysis);
+// selectedExamId changing means the subject may have changed too (a session
+// switch resets it), so both the single-exam analysis and the subject-scoped
+// trend need to reload — trend alone was previously stuck showing whichever
+// subject was selected on mount.
+watch(selectedExamId, () => {
+  loadAnalysis();
+  loadTrend();
+});
 </script>
 
 <template>
@@ -139,9 +176,14 @@ watch([selectedExamId, bucketSize], loadAnalysis);
     <header class="page-header">
       <h1>班级成绩分析</h1>
       <div class="row">
+        <select v-model="selectedSessionId" class="select" style="width: auto" @change="onSessionChange">
+          <option v-for="s in sessions" :key="s.id" :value="s.id">
+            {{ s.name }}（{{ s.examDate }}）
+          </option>
+        </select>
         <select v-model="selectedExamId" class="select" style="width: auto">
-          <option v-for="e in exams" :key="e.id" :value="e.id">
-            {{ e.name }}（{{ e.examDate }}）
+          <option v-for="e in subjectsInSession" :key="e.id" :value="e.id">
+            {{ e.subject ?? '未命名科目' }}
           </option>
         </select>
         <select v-model.number="bucketSize" class="select" style="width: auto">
@@ -151,9 +193,13 @@ watch([selectedExamId, bucketSize], loadAnalysis);
       </div>
     </header>
 
+    <p v-if="selectedSession && selectedExam" class="hint">
+      当前分析：{{ selectedSession.name }} · {{ selectedExam.subject ?? '未命名科目' }}（{{ selectedSession.examDate }}）
+    </p>
+
     <div v-if="loading" class="empty">加载中…</div>
 
-    <EmptyState v-else-if="!exams.length" icon="chart" title="还没有考试数据">
+    <EmptyState v-else-if="!sessions.length" icon="chart" title="还没有考试数据">
       先在班级页创建考试并录入成绩，这里会自动生成图表
     </EmptyState>
 
