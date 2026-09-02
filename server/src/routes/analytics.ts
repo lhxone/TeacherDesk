@@ -122,7 +122,10 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
       where: {
         classId,
         deletedAt: null,
-        ...(q.subject ? { subject: q.subject } : {}),
+        // subject=__none__ asks for exams with no subject set (a real,
+        // distinct case — not "don't filter", which omitting the param
+        // entirely already means).
+        ...(q.subject === '__none__' ? { subject: null } : q.subject ? { subject: q.subject } : {}),
         ...(q.examType ? { examType: q.examType } : {}),
         ...(q.from || q.to
           ? {
