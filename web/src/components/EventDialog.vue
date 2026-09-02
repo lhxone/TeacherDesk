@@ -208,7 +208,7 @@ async function remove() {
 
       <label class="check">
         <input v-model="form.repeats" type="checkbox" />
-        <span>每周重复（如每周三值班）</span>
+        <span>每周重复</span>
       </label>
 
       <div v-if="form.repeats" class="field">
