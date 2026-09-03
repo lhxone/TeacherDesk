@@ -5,7 +5,9 @@ import { useAuthStore } from '@/stores/auth';
 import { useClassStore } from '@/stores/classes';
 import ModalDialog from '@/components/ModalDialog.vue';
 import EventDialog from '@/components/EventDialog.vue';
+import ScheduleDayColumn from '@/components/ScheduleDayColumn.vue';
 import type { AgendaDay, Envelope, EventItem, ScheduleSlot } from '@/api/types';
+import { instantMinutes, localIsoDate, useScheduleLayout } from '@/composables/useScheduleLayout';
 
 const auth = useAuthStore();
 const classStore = useClassStore();
@@ -19,6 +21,15 @@ const error = ref('');
 // Mobile defaults to the day view; desktop shows the full week (PRD §3.4.1).
 const view = ref<'week' | 'day'>(window.innerWidth > 768 ? 'week' : 'day');
 const currentDate = ref(new Date().toISOString().slice(0, 10));
+
+// Marks today's column in the week header (see week-head-day.today below).
+// A plain constant, not reactive to the clock: this label only needs to be
+// right for however long the page stays open in one sitting, and re-deriving
+// it on a timer would be one more moving part for a once-a-day boundary that
+// a full page reload already resets — unlike the current-time line in
+// ScheduleDayColumn, which visibly moves within a single sitting and does
+// need the 30s tick.
+const todayIso = localIsoDate(new Date());
 
 const showForm = ref(false);
 const editingSlot = ref<ScheduleSlot | null>(null);
@@ -47,95 +58,12 @@ const periods = computed(() => Array.from({ length: periodsPerDay.value }, (_, i
 // and a todo all share one coordinate system and never need reconciling.
 const daySchedule = computed(() => auth.user?.settings.daySchedule ?? []);
 
-/** "HH:MM" -> minutes since midnight. */
-function toMinutes(hhmm: string): number {
-  const [h, m] = hhmm.split(':').map(Number);
-  return h * 60 + m;
-}
-
-/** Minutes since local midnight for an ISO instant. */
-function instantMinutes(iso: string): number {
-  const d = new Date(iso);
-  return d.getHours() * 60 + d.getMinutes();
-}
-
-/** The calendar's visible time range: the day schedule's earliest start to
- * its latest end, padded 15 min each side so edge blocks aren't flush
- * against the top/bottom. Falls back to 07:00–18:00 with no day schedule. */
-const dayBounds = computed(() => {
-  const rows = daySchedule.value;
-  if (!rows.length) return { start: 7 * 60, end: 18 * 60 };
-  const starts = rows.map((r) => toMinutes(r.start));
-  const ends = rows.map((r) => toMinutes(r.end));
-  return { start: Math.max(0, Math.min(...starts) - 15), end: Math.min(24 * 60, Math.max(...ends) + 15) };
-});
-
-// A pure minute→percentage mapping squashes short blocks (眼操, 5 min) to a
-// couple of px — too little to read their label. Instead each day-schedule
-// row gets a minimum share of the calendar's height (MIN_ROW_SHARE, as a
-// fraction of an "average" row) before the remaining height is divided by
-// actual minutes, then those per-row shares are turned into cumulative
-// top/height percentages — like sizing CSS grid rows with `minmax()`, but
-// computed here so the result is still a plain top/height percentage that
-// works with the rest of the absolute-positioning overlay (lessons, todos).
-const MIN_ROW_SHARE = 0.85; // as a fraction of the day's average per-row minutes
-
-const rowLayout = computed(() => {
-  const rows = daySchedule.value;
-  const { start: dayStart, end: dayEnd } = dayBounds.value;
-  const totalMinutes = dayEnd - dayStart;
-  if (!rows.length || totalMinutes <= 0) return { rows: [] as { top: number; height: number }[], totalShare: 1 };
-
-  const avgMinutes = totalMinutes / rows.length;
-  const minShare = avgMinutes * MIN_ROW_SHARE;
-  const shares = rows.map((r) => Math.max(toMinutes(r.end) - toMinutes(r.start), minShare));
-  const totalShare = shares.reduce((a, b) => a + b, 0);
-
-  let cursor = 0;
-  const laidOut = shares.map((share) => {
-    const top = cursor;
-    cursor += share;
-    return { top, height: share };
-  });
-  return { rows: laidOut, totalShare };
-});
-
-/** Percentage position/height within the calendar for the Nth day-schedule row. */
-function rowStyle(rowIndex: number): { top: string; height: string } {
-  const { rows, totalShare } = rowLayout.value;
-  const r = rows[rowIndex];
-  if (!r || totalShare <= 0) return { top: '0%', height: '0%' };
-  return { top: `${(r.top / totalShare) * 100}%`, height: `${(r.height / totalShare) * 100}%` };
-}
-
-/** Percentage position/height for an arbitrary minute range (a todo's
- * start–end), interpolated across whichever day-schedule rows it overlaps —
- * so a todo spanning a short row still lines up with that row's
- * minimum-share height instead of the raw minute proportion. */
-function timeRangeStyle(startMin: number, endMin: number): { top: string; height: string } {
-  const rows = daySchedule.value;
-  const { rows: laidOut, totalShare } = rowLayout.value;
-  if (!rows.length || totalShare <= 0) return { top: '0%', height: '0%' };
-
-  // Interpolates a minute value to a cumulative-share position by locating
-  // which row it falls in and blending linearly within that row's share.
-  const toShare = (min: number): number => {
-    for (let i = 0; i < rows.length; i++) {
-      const rowStart = toMinutes(rows[i].start);
-      const rowEnd = toMinutes(rows[i].end);
-      if (min <= rowEnd || i === rows.length - 1) {
-        const span = Math.max(rowEnd - rowStart, 1);
-        const frac = Math.min(Math.max((min - rowStart) / span, 0), 1);
-        return laidOut[i].top + frac * laidOut[i].height;
-      }
-    }
-    return laidOut[laidOut.length - 1].top + laidOut[laidOut.length - 1].height;
-  };
-
-  const top = toShare(startMin);
-  const bottom = toShare(endMin);
-  return { top: `${(top / totalShare) * 100}%`, height: `${(Math.max(bottom - top, 0) / totalShare) * 100}%` };
-}
+// Shared time-axis math (row layout, minute→percentage, the now-line's
+// position) lives in useScheduleLayout so ScheduleDayColumn — used for both
+// the week grid's per-weekday columns and the day view's single wide column
+// — never disagrees with this view's own time-gutter about where a given
+// row/time sits. Only rowStyle is used directly here, for the gutter labels.
+const { rowStyle } = useScheduleLayout(daySchedule);
 
 /** A todo's start/end as minutes, or null for all-day / no-end-time todos
  * (which get their own fixed strip instead of a calendar block). */
@@ -145,10 +73,6 @@ function todoMinutes(e: EventItem): { start: number; end: number } | null {
   const end = instantMinutes(e.endAt);
   return end > start ? { start, end } : null;
 }
-
-/** weekly always shows; odd/even both render in the grid, labelled. */
-const slotAt = (weekday: number, period: number) =>
-  slots.value.filter((s) => s.weekday === weekday && s.period === period);
 
 async function loadSlots() {
   const res = await api.get<Envelope<ScheduleSlot[]>>('/schedule/slots');
@@ -184,86 +108,22 @@ const weekEvents = computed(() =>
 /** All-day / no-end-time todos, shown in the fixed strip atop each day column. */
 const allDayWeekEvents = computed(() => weekEvents.value.filter((e) => todoMinutes(e) === null));
 
-/** Timed todos with an end time, positioned on the calendar by minute. */
-const timedWeekEvents = computed(() =>
-  weekEvents.value
-    .map((e) => ({ event: e, range: todoMinutes(e) }))
-    .filter((x): x is { event: (typeof weekEvents.value)[number]; range: { start: number; end: number } } =>
-      x.range !== null,
-    ),
-);
-
-type LaidOutBlock = { key: string; left: number; width: number };
-
-/**
- * Assigns each block in one day column a left/width fraction so overlapping
- * blocks (a lesson and a todo at the same time, or two todos) sit side by
- * side instead of on top of each other. Classic interval-graph column
- * packing: group mutually-overlapping blocks into a cluster, give the
- * cluster's blocks one column each out of however many the cluster needs.
- */
-function packColumns(blocks: { key: string; start: number; end: number }[]): LaidOutBlock[] {
-  const sorted = [...blocks].sort((a, b) => a.start - b.start || a.end - b.end);
-  const result: LaidOutBlock[] = [];
-  let cluster: typeof sorted = [];
-  let clusterEnd = -Infinity;
-
-  const flush = () => {
-    if (!cluster.length) return;
-    // Greedy column assignment within the cluster: each block takes the
-    // first column whose previous occupant has already ended.
-    const columnEnds: number[] = [];
-    const columnOf = new Map<string, number>();
-    for (const b of cluster) {
-      let col = columnEnds.findIndex((end) => end <= b.start);
-      if (col === -1) col = columnEnds.length;
-      columnEnds[col] = b.end;
-      columnOf.set(b.key, col);
-    }
-    const columns = columnEnds.length;
-    for (const b of cluster) {
-      const col = columnOf.get(b.key)!;
-      result.push({ key: b.key, left: (col / columns) * 100, width: (1 / columns) * 100 });
-    }
-    cluster = [];
-  };
-
-  for (const b of sorted) {
-    if (cluster.length && b.start >= clusterEnd) flush();
-    cluster.push(b);
-    clusterEnd = Math.max(clusterEnd, b.end);
-  }
-  flush();
-
-  return result;
+/** Timed todos with an end time, one filtered list per weekday — handed
+ * straight to each ScheduleDayColumn, which does its own interval packing. */
+function timedEventsFor(weekday: number): EventItem[] {
+  return weekEvents.value.filter((e) => e.weekday === weekday && todoMinutes(e) !== null);
 }
 
-/** Every calendar block (lesson slots + timed todos) for one weekday, laid
- * out into non-overlapping columns. Keyed so the template can look up each
- * block's position by its own id. */
-const dayLayouts = computed(() => {
-  const layouts = new Map<number, Map<string, LaidOutBlock>>();
-  for (const d of visibleDays.value) {
-    const blocks: { key: string; start: number; end: number }[] = [];
-    for (const row of daySchedule.value) {
-      if (row.kind !== 'lesson' || row.period == null) continue;
-      for (const s of slotAt(d, row.period)) {
-        blocks.push({ key: `slot-${s.id}`, start: toMinutes(row.start), end: toMinutes(row.end) });
-      }
-    }
-    for (const { event: e, range } of timedWeekEvents.value) {
-      if (e.weekday !== d) continue;
-      blocks.push({ key: `todo-${e.id}`, start: range.start, end: range.end });
-    }
-    const packed = packColumns(blocks);
-    layouts.set(d, new Map(packed.map((b) => [b.key, b])));
-  }
-  return layouts;
-});
+/** Same split as allDayWeekEvents/timedEventsFor, but for the day view's
+ * single date — agenda.events isn't pre-split by all-day vs timed the way
+ * the week endpoint's flattened weekEvents is. */
+const allDayAgendaEvents = computed(() => (agenda.value?.events ?? []).filter((e) => todoMinutes(e) === null));
+const timedAgendaEvents = computed(() => (agenda.value?.events ?? []).filter((e) => todoMinutes(e) !== null));
 
-function blockLayout(weekday: number, key: string): LaidOutBlock {
-  return dayLayouts.value.get(weekday)?.get(key) ?? { key, left: 0, width: 100 };
-}
+/** The day view's ScheduleSlot list for its one weekday — same filter
+ * (weekday match, no date-range/parity filter) as the week grid's per-column
+ * `slots.filter(...)`, so a lesson shows up identically in both views. */
+const agendaSlots = computed(() => (agenda.value ? slots.value.filter((s) => s.weekday === agenda.value!.weekday) : []));
 
 function shiftDay(delta: number) {
   const d = new Date(`${currentDate.value}T00:00:00Z`);
@@ -343,9 +203,6 @@ async function removeSlot(id: string) {
   await loadSlots();
 }
 
-const ruleLabel = (r: string) =>
-  r === 'odd_week' ? '单周' : r === 'even_week' ? '双周' : '';
-
 // --- todos ---
 const showEventDialog = ref(false);
 const editingEvent = ref<EventItem | null>(null);
@@ -414,7 +271,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="page" :class="{ 'page-week': view === 'week' && !loading }">
+  <div class="page" :class="{ 'page-week': !loading }">
     <header class="page-header">
       <h1>日程表</h1>
       <div class="row">
@@ -447,8 +304,16 @@ onMounted(async () => {
              all-day/no-end-time todos have no minute range to position by. -->
         <div class="week-head">
           <div class="time-gutter-head" />
-          <div v-for="d in visibleDays" :key="d" class="week-head-day">
-            <div class="week-head-weekday">{{ WEEKDAYS[d - 1] }}</div>
+          <div
+            v-for="d in visibleDays"
+            :key="d"
+            class="week-head-day"
+            :class="{ today: weekAgenda.find((a) => a.weekday === d)?.date === todayIso }"
+          >
+            <div class="week-head-weekday">
+              {{ WEEKDAYS[d - 1] }}
+              <span v-if="weekAgenda.find((a) => a.weekday === d)?.date === todayIso" class="today-badge">今天</span>
+            </div>
             <div class="week-head-date">{{ weekAgenda.find((a) => a.weekday === d)?.date.slice(5) ?? '' }}</div>
           </div>
         </div>
@@ -502,150 +367,102 @@ onMounted(async () => {
         </div>
 
         <div v-for="d in visibleDays" :key="d" class="week-day-col">
-          <!-- Background blocks: activities shade the whole column width;
-               lesson blocks are click targets for creating a course when
-               empty, and otherwise just backdrop (the actual lesson card is
-               rendered as its own positioned block below, alongside todos,
-               so interval packing can place both in the same coordinate
-               space). -->
-          <div
-            v-for="(row, ri) in daySchedule"
-            :key="ri"
-            class="time-bg-block"
-            :class="{ 'time-bg-activity': row.kind === 'activity' }"
-            :style="rowStyle(ri)"
-            @click="row.kind === 'lesson' && row.period != null && !slotAt(d, row.period).length && openCreate(d, row.period)"
+          <ScheduleDayColumn
+            :weekday="d"
+            :date="weekAgenda.find((a) => a.weekday === d)?.date ?? ''"
+            :day-schedule="daySchedule"
+            :slots="slots.filter((s) => s.weekday === d)"
+            :timed-events="timedEventsFor(d)"
+            @create-lesson="(period) => openCreate(d, period)"
+            @edit-slot="openEditSlot"
+            @remove-slot="removeSlot"
+            @edit-event="openEditEvent"
+            @toggle-event="toggleEvent"
           />
-
-          <!-- Lessons -->
-          <template v-for="(row, ri) in daySchedule" :key="ri">
-            <div v-if="row.kind === 'lesson' && row.period != null">
-              <div
-                v-for="s in slotAt(d, row.period)"
-                :key="s.id"
-                class="slot"
-                :style="{
-                  borderLeftColor: s.classColor ?? 'var(--brand)',
-                  ...rowStyle(ri),
-                  left: `${blockLayout(d, `slot-${s.id}`).left}%`,
-                  width: `calc(${blockLayout(d, `slot-${s.id}`).width}% - 4px)`,
-                }"
-                @click="openEditSlot(s)"
-              >
-                <div class="slot-subject">
-                  {{ s.subject ?? '课程' }}
-                  <span v-if="ruleLabel(s.repeatRule)" class="badge">{{ ruleLabel(s.repeatRule) }}</span>
-                </div>
-                <div class="hint">{{ s.className ?? '—' }}</div>
-                <div v-if="s.location" class="hint">{{ s.location }}</div>
-                <button class="del" @click.stop="removeSlot(s.id)">×</button>
-              </div>
-            </div>
-          </template>
-
-          <!-- Timed todos, positioned by their real start–end time and
-               packed into a free column alongside any overlapping lesson. -->
-          <div
-            v-for="{ event: e, range } in timedWeekEvents.filter((t) => t.event.weekday === d)"
-            :key="e.id"
-            class="todo-block"
-            :class="{ done: e.isDone }"
-            :style="{
-              ...timeRangeStyle(range.start, range.end),
-              left: `${blockLayout(d, `todo-${e.id}`).left}%`,
-              width: `calc(${blockLayout(d, `todo-${e.id}`).width}% - 4px)`,
-            }"
-            :title="`${eventTimeLabel(e)} · ${e.title}`"
-            @click="openEditEvent(e)"
-          >
-            <input
-              type="checkbox"
-              :checked="e.isDone"
-              @click.stop
-              @change="toggleEvent(e, ($event.target as HTMLInputElement).checked)"
-            />
-            <div class="todo-block-text">
-              <div class="todo-block-title">
-                {{ e.title }}
-                <span v-if="e.repeatWeekday != null" class="badge">每周</span>
-              </div>
-              <div class="hint">{{ eventTimeLabel(e) }}</div>
-            </div>
-          </div>
         </div>
         </div>
       </div>
     </div>
 
-    <!-- Day view -->
-    <div v-else class="stack">
+    <!-- Day view: same time-axis layout as the week grid (one
+         ScheduleDayColumn, just wider), so a lesson/todo and the
+         current-time line sit at an identical position in either view. -->
+    <div v-else-if="view === 'day'" class="week-wrap">
       <div class="day-nav">
         <button class="btn btn-sm" @click="shiftDay(-1)">‹ 前一天</button>
         <input v-model="currentDate" class="input" type="date" style="width: auto" @change="loadAgenda" />
         <button class="btn btn-sm" @click="shiftDay(1)">后一天 ›</button>
       </div>
 
-      <div v-if="agenda" class="stack">
-        <p class="hint">
-          {{ WEEKDAYS[agenda.weekday - 1] }} ·
-          {{ agenda.weekParity === 'odd' ? '单周' : '双周' }}
-        </p>
-
-        <section class="card">
-          <div class="card-title">今日作息</div>
-          <p v-if="!agenda.timeline.length" class="empty-inline">这一天没有作息安排</p>
-          <div
-            v-for="(item, i) in agenda.timeline"
-            :key="i"
-            class="lesson"
-            :class="{ 'lesson-activity': item.kind === 'activity' }"
-          >
-            <span
-              class="bar"
-              :style="{
-                background:
-                  item.kind === 'lesson' ? (item.classColor ?? 'var(--brand)') : 'var(--border-strong)',
-              }"
-            />
-            <div style="min-width: 108px">
-              <strong>{{ item.label }}</strong>
-              <div class="hint">{{ item.start }}–{{ item.end }}</div>
+      <div v-if="agenda" class="week-frame">
+        <div class="week-head">
+          <div class="time-gutter-head" />
+          <div class="week-head-day" :class="{ today: agenda.date === todayIso }">
+            <div class="week-head-weekday">
+              {{ WEEKDAYS[agenda.weekday - 1] }}
+              <span v-if="agenda.date === todayIso" class="today-badge">今天</span>
             </div>
-            <div v-if="item.kind === 'lesson'">
-              <div>{{ item.subject ?? (item.slotId ? '课程' : '空堂') }}</div>
-              <div v-if="item.slotId" class="hint">
-                {{ item.className ?? '—' }}<template v-if="item.location"> · {{ item.location }}</template>
-              </div>
+            <div class="week-head-date">
+              {{ agenda.date.slice(5) }} · {{ agenda.weekParity === 'odd' ? '单周' : '双周' }}
             </div>
-            <div v-else class="hint">课间活动</div>
           </div>
-        </section>
+        </div>
+        <div class="week-head week-head-todos">
+          <div class="time-gutter-head todo-row-label">
+            <span>全天待办</span>
+            <button class="todo-add-header" title="新增待办" @click="openCreateEvent(currentDate)">+</button>
+          </div>
+          <div class="todo-cell">
+            <div
+              v-for="e in allDayAgendaEvents"
+              :key="e.id"
+              class="todo-chip"
+              :class="{ done: e.isDone }"
+              :title="`${eventTimeLabel(e)} · ${e.title}`"
+              @click="openEditEvent(e)"
+            >
+              <input
+                type="checkbox"
+                :checked="e.isDone"
+                @click.stop
+                @change="toggleEvent(e, ($event.target as HTMLInputElement).checked)"
+              />
+              <span class="todo-chip-text">{{ e.title }}</span>
+              <span v-if="e.repeatWeekday != null" class="badge">每周</span>
+            </div>
+            <button class="todo-add" title="新增待办" @click="openCreateEvent(currentDate)">+</button>
+          </div>
+        </div>
 
-        <section class="card">
-          <div class="row" style="margin-bottom: 10px">
-            <div class="card-title" style="margin: 0">待办（{{ agenda.events.length }}）</div>
-            <div class="spacer" />
-            <button class="btn btn-sm btn-primary" @click="openCreateEvent()">+ 新增待办</button>
+        <div class="week-body">
+          <div class="time-gutter">
+            <div
+              v-for="(row, ri) in daySchedule"
+              :key="ri"
+              class="time-gutter-label time-gutter-label-stacked"
+              :title="`${row.label} ${row.start}–${row.end}`"
+              :style="rowStyle(ri)"
+            >
+              <strong>{{ row.label }}</strong>
+              <span class="time-gutter-time">{{ row.start }}–{{ row.end }}</span>
+            </div>
           </div>
 
-          <p v-if="!agenda.events.length" class="empty-inline">这一天没有待办</p>
-
-          <div v-for="e in agenda.events" :key="e.id" class="todo">
-            <input
-              type="checkbox"
-              :checked="e.isDone"
-              @change="toggleEvent(e, ($event.target as HTMLInputElement).checked)"
+          <div class="week-day-col day-col-wide">
+            <ScheduleDayColumn
+              :weekday="agenda.weekday"
+              :date="agenda.date"
+              :day-schedule="daySchedule"
+              :slots="agendaSlots"
+              :timed-events="timedAgendaEvents"
+              @create-lesson="(period) => openCreate(agenda!.weekday, period)"
+              @edit-slot="openEditSlot"
+              @remove-slot="removeSlot"
+              @edit-event="openEditEvent"
+              @toggle-event="toggleEvent"
             />
-            <span class="todo-title" :class="{ done: e.isDone }" @click="openEditEvent(e)">
-              {{ e.title }}
-            </span>
-            <span class="hint">{{ eventTimeLabel(e) }}</span>
-            <span v-if="e.repeatWeekday != null" class="badge">每周</span>
-            <span v-if="e.className" class="badge">{{ e.className }}</span>
-            <div class="spacer" />
-            <button class="btn btn-sm" @click="openEditEvent(e)">编辑</button>
           </div>
-        </section>
+        </div>
       </div>
     </div>
 
@@ -720,14 +537,14 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-/* Desktop: the week view fills the viewport below the page header and lets
-   the calendar itself absorb any leftover/overflow height, so switching to
-   周视图 shows the whole week without scrolling the page — only the
-   calendar body scrolls internally, and only if the user's day schedule
-   spans more than fits (e.g. a custom 40-row schedule). Mobile drops this
-   (see the media query below) — a phone screen is too short for a whole
-   week to ever fit, so the page just scrolls normally instead of fighting
-   for a one-screen fit. */
+/* Desktop: both the week grid and the day view (a single wide column of the
+   same .week-frame layout) fill the viewport below the page header and let
+   the calendar itself absorb any leftover/overflow height, so neither view
+   needs to scroll the page — only the calendar body scrolls internally, and
+   only if the user's day schedule spans more than fits (e.g. a custom
+   40-row schedule). Mobile drops this (see the media query below) — a phone
+   screen is too short for a whole calendar to ever fit, so the page just
+   scrolls normally instead of fighting for a one-screen fit. */
 .page-week {
   display: flex;
   flex-direction: column;
@@ -794,13 +611,28 @@ onMounted(async () => {
   border-left: 1px solid var(--border);
 }
 
+.week-head-day.today { background: var(--brand-soft); }
+.week-head-day.today .week-head-weekday { color: var(--brand-dark); }
+
+.today-badge {
+  display: inline-block;
+  margin-left: 3px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
 .week-head-date {
   font-weight: 400;
   font-size: 11px;
   color: var(--text-muted);
 }
 
-.week-head-todos { background: #fffdf5; }
+.week-head-todos { background: var(--warning-soft); }
 
 .todo-row-label {
   display: flex;
@@ -858,7 +690,7 @@ onMounted(async () => {
   align-items: baseline;
   justify-content: center;
   gap: 3px;
-  background: #f8fafc;
+  background: var(--hover-tint);
   border-top: 1px solid var(--border);
   padding: 1px 2px;
   font-size: 10px;
@@ -883,76 +715,9 @@ onMounted(async () => {
   border-left: 1px solid var(--border);
 }
 
-.time-bg-block {
-  position: absolute;
-  left: 0;
-  right: 0;
-  border-top: 1px solid var(--border);
-  cursor: pointer;
-}
-
-.time-bg-activity {
-  background: #f1f5f9;
-  cursor: default;
-}
-
-.slot {
-  position: absolute;
-  box-sizing: border-box;
-  background: var(--brand-soft);
-  border-left: 3px solid var(--brand);
-  border-radius: 6px;
-  padding: 3px 6px;
-  margin: 1px 2px;
-  font-size: 11px;
-  line-height: 1.25;
-  white-space: normal;
-  overflow: hidden;
-  cursor: pointer;
-}
-
-.slot-subject { font-weight: 600; }
-.slot .hint { font-size: 10px; line-height: 1.2; }
-
-.del {
-  position: absolute;
-  top: 2px;
-  right: 4px;
-  border: none;
-  background: none;
-  color: var(--text-faint);
-  display: none;
-  font-size: 14px;
-}
-
-.slot:hover .del { display: block; }
-
-/* Timed todo, positioned on the calendar at its real start–end time and
-   packed into a free column (script-computed left/width) alongside any
-   overlapping lesson, exactly like two overlapping events in a real
-   calendar app. */
-.todo-block {
-  position: absolute;
-  box-sizing: border-box;
-  display: flex;
-  align-items: flex-start;
-  gap: 4px;
-  background: #fffbeb;
-  border-left: 3px solid var(--warning);
-  border-radius: 6px;
-  padding: 3px 6px;
-  margin: 1px 2px;
-  font-size: 11px;
-  line-height: 1.25;
-  cursor: pointer;
-  overflow: hidden;
-  z-index: 1;
-}
-
-.todo-block input[type='checkbox'] { margin-top: 1px; flex-shrink: 0; width: 12px; height: 12px; }
-.todo-block-text { min-width: 0; overflow: hidden; }
-.todo-block-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.todo-block.done .todo-block-title { color: var(--text-faint); text-decoration: line-through; }
+/* Day view reuses the week grid's single-column frame at full width instead
+   of splitting into 5-7 narrow columns. */
+.day-col-wide { flex: 1; }
 
 .todo-chip {
   display: flex;
@@ -982,12 +747,5 @@ onMounted(async () => {
 
 .day-nav { display: flex; align-items: center; gap: 10px; justify-content: center; }
 
-.lesson { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
-.lesson-activity { opacity: 0.75; }
-.bar { width: 4px; height: 34px; border-radius: 2px; }
-.todo { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
-.todo-title { cursor: pointer; }
-.todo-title:hover { color: var(--brand); }
-.todo .done { color: var(--text-faint); text-decoration: line-through; }
 .badge { font-size: 10px; padding: 1px 5px; }
 </style>

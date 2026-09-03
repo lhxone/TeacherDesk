@@ -30,6 +30,11 @@
   --offline-bg: #fffbeb;
   --offline-border: #fde68a;
   --offline-text: #92400e;
+  --warning-soft: #fffbeb;
+
+  /* Seating chart's gender color cue only — not a general-purpose accent. */
+  --female-soft: #fdf2f8;
+  --female-accent: #ec4899;
 
   --nav-height: 60px;
   --sidebar-width: 220px;
@@ -67,6 +72,10 @@
   --offline-bg: #3a2f0f;
   --offline-border: #6b5417;
   --offline-text: #fbbf24;
+  --warning-soft: #3a2f0f;
+
+  --female-soft: #3a1f2e;
+  --female-accent: #f472b6;
 
   color-scheme: dark;
 }

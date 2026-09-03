@@ -502,8 +502,11 @@ onMounted(async () => {
 .seating-layout { display: flex; gap: 20px; align-items: flex-start; }
 .board-wrap { flex: 1; overflow-x: auto; }
 
+/* Fixed dark banner regardless of theme — not var(--text), which flips to a
+   light color in dark mode and would pair with the equally-light #fff text
+   below into unreadable near-zero contrast. */
 .podium {
-  background: var(--text);
+  background: #334155;
   color: #fff;
   text-align: center;
   padding: 6px;
@@ -533,17 +536,18 @@ onMounted(async () => {
    where the aisle falls. */
 .aisle-gap { background: transparent; }
 
-.seat.disabled { background: #f1f5f9; border-style: solid; opacity: 0.5; }
+.seat.disabled { background: var(--hover-tint); border-style: solid; opacity: 0.5; }
 .seat.filled { border-style: solid; border-color: var(--brand); background: var(--brand-soft); }
-.seat.pinned { border-color: var(--warning); background: #fffbeb; }
+.seat.pinned { border-color: var(--warning); background: var(--warning-soft); }
 
 /* Gender shown as a seat-card color cue rather than an icon/label, so it
    reads at a glance without taking up extra text space. Kept subtle enough
-   to stay legible alongside .filled/.pinned's border-color overrides. */
-.seat.filled.male { background: #eff6ff; }
-.seat.filled.female { background: #fdf2f8; }
-.seat.filled.male.pinned { background: #fffbeb; border-color: #3b82f6; }
-.seat.filled.female.pinned { background: #fffbeb; border-color: #ec4899; }
+   to stay legible alongside .filled/.pinned's border-color overrides.
+   --female-soft/--female-accent exist only for this cue, not general use. */
+.seat.filled.male { background: var(--brand-soft); }
+.seat.filled.female { background: var(--female-soft); }
+.seat.filled.male.pinned { background: var(--warning-soft); border-color: var(--brand); }
+.seat.filled.female.pinned { background: var(--warning-soft); border-color: var(--female-accent); }
 
 .seat-card {
   width: 100%;

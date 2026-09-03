@@ -240,7 +240,7 @@ onMounted(load);
 </template>
 
 <style scoped>
-tr.absent { background: #fffbeb; }
+tr.absent { background: var(--warning-soft); }
 tr.absent td { color: var(--text-faint); }
 .score-input { text-align: center; }
 </style>

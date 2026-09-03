@@ -421,7 +421,7 @@ onMounted(() => {
 .match-snippet { background: var(--hover-tint); padding: 6px 8px; border-radius: var(--radius-sm); }
 .tags-row { flex-wrap: wrap; }
 
-.badge-warn { background: #fef3c7; color: #92400e; }
+.badge-warn { background: var(--warning-soft); color: var(--offline-text); }
 .badge-danger { background: var(--danger-soft); color: var(--danger); }
 
 .fav-btn {
