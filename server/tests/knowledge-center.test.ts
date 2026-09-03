@@ -380,6 +380,54 @@ describe('resources: search and filter', () => {
     expect(res.json().data[0].type).toBe('image');
   });
 
+  it('combines full-text search with a tagId/knowledgeNodeId filter instead of one silently winning', async () => {
+    const tag = await app.inject({ method: 'POST', url: '/api/v1/tags', headers: user.auth, payload: { name: '重点' } });
+    const tagId = tag.json().data.id;
+    const node = await app.inject({
+      method: 'POST',
+      url: '/api/v1/knowledge-nodes',
+      headers: user.auth,
+      payload: { name: '有理数' },
+    });
+    const nodeId = node.json().data.id;
+
+    // Matches the search term and carries both the tag and the knowledge node.
+    const tagged = multipartFileWithFields(Buffer.from('x'), 'a.txt', {
+      title: '二次方程复习课',
+      tagIds: tagId,
+      knowledgeNodeIds: nodeId,
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/resources',
+      headers: { ...user.auth, ...tagged.headers },
+      payload: tagged.payload,
+    });
+    // Matches the search term but carries neither — must be excluded once the
+    // filter is applied.
+    const untagged = multipartFileWithFields(Buffer.from('x'), 'b.txt', { title: '二次方程练习题' });
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/resources',
+      headers: { ...user.auth, ...untagged.headers },
+      payload: untagged.payload,
+    });
+
+    const byTag = await app.inject({
+      method: 'GET',
+      url: `/api/v1/resources?q=${encodeURIComponent('二次方程')}&tagId=${tagId}`,
+      headers: user.auth,
+    });
+    expect(byTag.json().data.map((r: { title: string }) => r.title)).toEqual(['二次方程复习课']);
+
+    const byNode = await app.inject({
+      method: 'GET',
+      url: `/api/v1/resources?q=${encodeURIComponent('二次方程')}&knowledgeNodeId=${nodeId}`,
+      headers: user.auth,
+    });
+    expect(byNode.json().data.map((r: { title: string }) => r.title)).toEqual(['二次方程复习课']);
+  });
+
   it('filters by favorite', async () => {
     const { headers, payload } = multipartFileWithFields(Buffer.from('x'), 'a.txt');
     const upload = await app.inject({ method: 'POST', url: '/api/v1/resources', headers: { ...user.auth, ...headers }, payload });

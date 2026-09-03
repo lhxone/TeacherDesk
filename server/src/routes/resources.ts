@@ -405,6 +405,18 @@ async function searchResources(
   if (q.collectionId) { filterClauses.push(`r.collection_id = $${i++}::uuid`); params.push(q.collectionId); }
   if (q.status) { filterClauses.push(`r.status = $${i++}::varchar`); params.push(q.status); }
   if (q.favorite) { filterClauses.push('r.is_favorite = true'); }
+  if (q.tagId) {
+    filterClauses.push(
+      `EXISTS (SELECT 1 FROM resource_tags rt2 WHERE rt2.resource_id = r.id AND rt2.tag_id = $${i++}::uuid)`,
+    );
+    params.push(q.tagId);
+  }
+  if (q.knowledgeNodeId) {
+    filterClauses.push(
+      `EXISTS (SELECT 1 FROM resource_knowledge_nodes rk WHERE rk.resource_id = r.id AND rk.knowledge_node_id = $${i++}::uuid)`,
+    );
+    params.push(q.knowledgeNodeId);
+  }
 
   const likeParamIndex = i++;
   params.push(likeTerm);
