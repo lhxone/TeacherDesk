@@ -192,7 +192,7 @@ const nowTop = computed(() => {
 }
 
 .time-bg-activity {
-  background: #f1f5f9;
+  background: var(--hover-tint);
   cursor: default;
 }
 
@@ -237,7 +237,7 @@ const nowTop = computed(() => {
   display: flex;
   align-items: flex-start;
   gap: 4px;
-  background: #fffbeb;
+  background: var(--warning-soft);
   border-left: 3px solid var(--warning);
   border-radius: 6px;
   padding: 3px 6px;

@@ -632,7 +632,7 @@ onMounted(async () => {
   color: var(--text-muted);
 }
 
-.week-head-todos { background: #fffdf5; }
+.week-head-todos { background: var(--warning-soft); }
 
 .todo-row-label {
   display: flex;
@@ -690,7 +690,7 @@ onMounted(async () => {
   align-items: baseline;
   justify-content: center;
   gap: 3px;
-  background: #f8fafc;
+  background: var(--hover-tint);
   border-top: 1px solid var(--border);
   padding: 1px 2px;
   font-size: 10px;

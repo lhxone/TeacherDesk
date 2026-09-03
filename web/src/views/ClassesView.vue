@@ -185,7 +185,7 @@ onMounted(() => store.fetchAll(filter.value));
 .class-color { position: absolute; inset: 0 auto 0 0; width: 4px; }
 .class-link { color: inherit; display: block; }
 .class-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
-.badge.archived { background: #f1f5f9; color: var(--text-muted); }
+.badge.archived { background: var(--hover-tint); color: var(--text-muted); }
 .class-actions { display: flex; gap: 6px; border-top: 1px solid var(--border); padding-top: 10px; }
 
 .swatch {

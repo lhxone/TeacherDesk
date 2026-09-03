@@ -930,16 +930,16 @@ watch(() => props.classId, loadAll);
 .tab-btn.active { color: var(--brand); border-bottom-color: var(--brand); }
 
 td .btn + .btn { margin-left: 6px; }
-tr.bad { background: #fef2f2; }
+tr.bad { background: var(--danger-soft); }
 .badge + .badge { margin-left: 4px; }
 
 .tag-picker { display: flex; flex-wrap: wrap; gap: 6px; }
 .tag-toggle { border: none; cursor: pointer; font: inherit; }
 
 .session-row { cursor: pointer; }
-.session-row:hover { background: var(--surface-hover, #f8fafc); }
+.session-row:hover { background: var(--hover-tint); }
 .chevron { display: inline-block; transition: transform 0.15s; color: var(--text-faint); }
 .chevron.open { transform: rotate(90deg); }
-.subject-detail-row td { background: #f8fafc; padding: 8px 8px 12px; }
+.subject-detail-row td { background: var(--hover-tint); padding: 8px 8px 12px; }
 .subject-table { width: 100%; }
 </style>
