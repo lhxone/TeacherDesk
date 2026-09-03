@@ -25,12 +25,25 @@ const error = ref('');
 
 const TYPE_OPTIONS: ResourceType[] = ['textbook', 'ppt', 'lesson_plan', 'image', 'mistake', 'document', 'other'];
 
+// .doc/.ppt are the legacy binary Office formats (OLE2), not the OOXML
+// zip+XML .docx/.pptx — this project has no parser for them at all (no text
+// extraction, no preview), only the newer format. Nudge the teacher to
+// re-save from Word/PowerPoint rather than silently uploading a file that
+// will sit with no preview and no search-indexed content.
+const LEGACY_OFFICE_EXTENSIONS = ['.doc', '.ppt'];
+const legacyFormatWarning = ref('');
+
 function onFileChange(e: Event) {
   const input = e.target as HTMLInputElement;
   file.value = input.files?.[0] ?? null;
   if (file.value && !title.value) {
     title.value = file.value.name.replace(/\.[^.]+$/, '');
   }
+  const name = file.value?.name.toLowerCase() ?? '';
+  const ext = LEGACY_OFFICE_EXTENSIONS.find((e) => name.endsWith(e));
+  legacyFormatWarning.value = ext
+    ? `这是旧版 ${ext} 格式，暂不支持预览和正文检索——建议用 Word/PowerPoint 打开后「另存为」${ext === '.doc' ? '.docx' : '.pptx'} 格式再上传`
+    : '';
 }
 
 function toggleTag(id: string) {
@@ -76,7 +89,8 @@ async function submit() {
       <div class="field">
         <label>文件</label>
         <input type="file" class="input" @change="onFileChange" />
-        <p class="hint">支持 PPT / Word / PDF / 图片等，上传后会自动在后台解析正文内容</p>
+        <p v-if="legacyFormatWarning" class="hint warn-text">{{ legacyFormatWarning }}</p>
+        <p v-else class="hint">支持 PPT / Word / PDF / 图片等，上传后会自动在后台解析正文内容</p>
       </div>
       <div class="field">
         <label>标题</label>
@@ -148,4 +162,5 @@ async function submit() {
 <style scoped>
 .tag-toggle { border: 1px solid transparent; opacity: 0.55; }
 .tag-toggle.picked { opacity: 1; border-color: currentColor; }
+.warn-text { color: var(--warning); }
 </style>
