@@ -23,9 +23,11 @@ Web 优先，同时以 PWA 形式提供可安装的手机端体验。
 
 ## 技术栈
 
-**后端** Node.js 20 · Fastify · Prisma · PostgreSQL 15 · Zod · JWT · web-push (VAPID)
-**前端** Vue 3 · Vite · Pinia · Vue Router · ECharts · vite-plugin-pwa
-**部署** Docker Compose · nginx · Cloudflare Tunnel
+| | |
+|---|---|
+| **后端** | Node.js 20 · Fastify · Prisma · PostgreSQL 15 · Zod · JWT · web-push (VAPID) |
+| **前端** | Vue 3 · Vite · Pinia · Vue Router · ECharts · vite-plugin-pwa |
+| **部署** | Docker Compose · nginx · Cloudflare Tunnel |
 
 ---
 
@@ -113,7 +115,7 @@ docker compose pull     # 从阿里云 ACR 拉取 API 与 Web 镜像（也同步
 docker compose up -d
 ```
 
-不开放任何端口，通过 Cloudflare Tunnel 对外提供 `https://t-desk.buildlink.cc`。
+不开放任何端口，仅通过 Cloudflare Tunnel 对外提供服务。
 生产数据只写入 Docker 的 `db-data` volume，不会进入应用镜像。若需在本机从源码
 构建，使用 `docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build`。
 
