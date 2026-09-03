@@ -8,6 +8,11 @@ import type { Envelope, StudentAnalytics } from '@/api/types';
 const props = defineProps<{ studentId: string }>();
 
 const data = ref<StudentAnalytics | null>(null);
+// subjectRadar must reflect every subject the student has taken, independent
+// of the line-chart's selected-subject filter below — otherwise defaulting
+// to one subject (see load()) would leave the radar with just that subject's
+// point and it'd never reach the 3-subject minimum to render.
+const radarData = ref<StudentAnalytics['subjectRadar']>([]);
 const loading = ref(true);
 
 // '__all__' is the cross-subject comparison mode; otherwise a specific
@@ -151,7 +156,7 @@ const rankOption = computed<Record<string, unknown>>(() => {
 });
 
 const radarOption = computed<Record<string, unknown>>(() => {
-  const radar = data.value?.subjectRadar ?? [];
+  const radar = radarData.value;
   return {
     tooltip: {},
     radar: {
@@ -181,6 +186,11 @@ async function load() {
     subject: selectedSubject.value === '__all__' ? '__all__' : selectedSubject.value || undefined,
   });
   data.value = res.data;
+  // subjectRadar always comes from the unfiltered (all-subjects) response,
+  // never from a single-subject-scoped one — see radarData declaration above.
+  if (!selectedSubject.value || selectedSubject.value === '__all__') {
+    radarData.value = res.data.subjectRadar;
+  }
   // Default to the most recent exam's subject — mixing subjects into one
   // score/rank line is misleading (different full scores, different exam
   // pools), see subjectSeries/timeline above.
@@ -192,8 +202,9 @@ async function load() {
 onMounted(async () => {
   try {
     await load();
-    // First load used no subject filter to discover `subjects`; if that set
-    // a default subject, reload scoped to just that subject.
+    // First load used no subject filter to discover `subjects` and populate
+    // radarData; if that set a default subject, reload scoped to just that
+    // subject for the score/rank charts (radarData is left untouched).
     if (selectedSubject.value) await load();
   } finally {
     loading.value = false;
@@ -277,7 +288,7 @@ watch(selectedSubject, load);
             <EChart :option="rankOption" height="280px" />
           </section>
 
-          <section v-if="data.subjectRadar.length >= 3" class="card">
+          <section v-if="radarData.length >= 3" class="card">
             <div class="card-title">各科标准分雷达</div>
             <EChart :option="radarOption" height="280px" />
           </section>
@@ -290,7 +301,7 @@ watch(selectedSubject, load);
                   <tr><th>科目</th><th>分数</th><th>班级均分</th><th>标准分</th></tr>
                 </thead>
                 <tbody>
-                  <tr v-for="r in data.subjectRadar" :key="r.subject">
+                  <tr v-for="r in radarData" :key="r.subject">
                     <td>{{ r.subject }}</td>
                     <td>{{ r.score }}</td>
                     <td>{{ r.classAvg ?? '—' }}</td>
