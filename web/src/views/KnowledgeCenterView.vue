@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import DOMPurify from 'dompurify';
 import { api } from '@/api/client';
 import { knowledgeNodesApi, resourcesApi } from '@/api/resources';
 import type { Envelope, KnowledgeNode, Resource, ResourceType, Tag } from '@/api/types';
@@ -35,6 +36,106 @@ const knowledgeNodes = ref<KnowledgeNode[]>([]);
 
 const showUpload = ref(false);
 const detail = ref<Resource | null>(null);
+
+// Preview panel state. Only one of these is populated at a time, depending
+// on detail.type/mimeType — see loadPreview(). Image/PDF/PPT are fetched as
+// an authenticated Blob (a plain <img>/<iframe src="/api/...">  can't carry
+// the Authorization header a bare browser request needs, same reason
+// resourcesApi.download() can't just be a link — see its comment), then
+// turned into an object URL. Word goes through a dedicated HTML endpoint.
+const previewLoading = ref(false);
+const previewError = ref<string | null>(null);
+const previewImageUrl = ref<string | null>(null);
+const previewPdfUrl = ref<string | null>(null);
+const previewDocxHtml = ref<string | null>(null);
+const pptxContainer = ref<HTMLElement | null>(null);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let pptxPreviewer: any = null;
+
+function clearPreview() {
+  if (previewImageUrl.value) URL.revokeObjectURL(previewImageUrl.value);
+  if (previewPdfUrl.value) URL.revokeObjectURL(previewPdfUrl.value);
+  previewImageUrl.value = null;
+  previewPdfUrl.value = null;
+  previewDocxHtml.value = null;
+  previewError.value = null;
+  pptxPreviewer?.destroy?.();
+  pptxPreviewer = null;
+}
+
+/** docx via .docx extension OR the OOXML wordprocessingml mimetype (mirrors the backend's own check). */
+function isDocx(r: Resource): boolean {
+  return r.originalFilename.toLowerCase().endsWith('.docx') || r.mimeType.includes('wordprocessingml');
+}
+function isPptx(r: Resource): boolean {
+  return r.originalFilename.toLowerCase().endsWith('.pptx') || r.mimeType.includes('presentationml');
+}
+
+async function loadPreview(r: Resource) {
+  clearPreview();
+  if (r.type === 'image') {
+    previewLoading.value = true;
+    try {
+      const blob = await api.blob(`/resources/${r.id}/download`);
+      previewImageUrl.value = URL.createObjectURL(blob);
+    } catch {
+      previewError.value = '预览加载失败';
+    } finally {
+      previewLoading.value = false;
+    }
+    return;
+  }
+
+  if (r.mimeType === 'application/pdf' || r.originalFilename.toLowerCase().endsWith('.pdf')) {
+    previewLoading.value = true;
+    try {
+      const blob = await api.blob(`/resources/${r.id}/download`);
+      previewPdfUrl.value = URL.createObjectURL(blob);
+    } catch {
+      previewError.value = '预览加载失败';
+    } finally {
+      previewLoading.value = false;
+    }
+    return;
+  }
+
+  if (isDocx(r)) {
+    previewLoading.value = true;
+    try {
+      const res = await api.get<Envelope<{ html: string }>>(`/resources/${r.id}/preview-html`);
+      previewDocxHtml.value = DOMPurify.sanitize(res.data.html);
+    } catch {
+      previewError.value = '预览加载失败';
+    } finally {
+      previewLoading.value = false;
+    }
+    return;
+  }
+
+  if (isPptx(r)) {
+    previewLoading.value = true;
+    try {
+      const blob = await api.blob(`/resources/${r.id}/download`);
+      const buffer = await blob.arrayBuffer();
+      await nextTick();
+      if (!pptxContainer.value) return;
+      const { init } = await import('pptx-preview');
+      pptxPreviewer = init(pptxContainer.value, { width: 640, height: 360 });
+      await pptxPreviewer.preview(buffer);
+    } catch {
+      previewError.value = '预览加载失败（该 PPT 可能格式不受支持）';
+    } finally {
+      previewLoading.value = false;
+    }
+  }
+}
+
+watch(detail, (r) => {
+  if (r) loadPreview(r);
+  else clearPreview();
+});
+
+onBeforeUnmount(clearPreview);
 
 const isResourceTypeSection = computed(
   () => section.value !== 'all' && section.value !== 'favorite' && section.value !== 'recent'
@@ -98,6 +199,7 @@ watch(searchTerm, () => {
 async function openDetail(r: Resource) {
   const res = await resourcesApi.get(r.id);
   detail.value = res.data;
+  resourcesApi.touch(r.id).catch(() => {});
 }
 
 async function toggleFavorite(r: Resource) {
@@ -255,6 +357,22 @@ onMounted(() => {
 
         <div v-if="detail.note" class="hint">{{ detail.note }}</div>
 
+        <!-- Visual preview: image / PDF / Word HTML / PPT slides. Falls back
+             to nothing (just the chunk text below) for types with no preview
+             — e.g. plain text or a legacy .doc/.ppt this project can't parse. -->
+        <div v-if="previewLoading" class="empty-inline">预览加载中…</div>
+        <p v-else-if="previewError" class="error-text">{{ previewError }}</p>
+        <div v-else-if="previewImageUrl" class="preview-panel">
+          <img :src="previewImageUrl" :alt="detail.title" class="preview-image" />
+        </div>
+        <div v-else-if="previewPdfUrl" class="preview-panel">
+          <iframe :src="previewPdfUrl" class="preview-pdf" title="PDF 预览"></iframe>
+        </div>
+        <div v-else-if="previewDocxHtml" class="preview-panel preview-docx" v-html="previewDocxHtml"></div>
+        <div v-show="isPptx(detail)" class="preview-panel">
+          <div ref="pptxContainer" class="preview-pptx"></div>
+        </div>
+
         <div v-if="detail.chunks?.length" class="chunk-list">
           <h3>内容预览（共 {{ detail.chunks.length }} 段）</h3>
           <div v-for="c in detail.chunks.slice(0, 5)" :key="c.id" class="chunk-item">
@@ -317,6 +435,16 @@ onMounted(() => {
 .chunk-list { border-top: 1px solid var(--border); padding-top: 12px; }
 .chunk-item { padding: 8px 0; border-bottom: 1px solid var(--border); }
 .chunk-item:last-child { border-bottom: none; }
+
+.preview-panel { display: flex; justify-content: center; background: var(--hover-tint); border-radius: var(--radius-sm); overflow: hidden; }
+.preview-image { max-width: 100%; max-height: 420px; object-fit: contain; }
+.preview-pdf { width: 100%; height: 480px; border: none; }
+.preview-docx { width: 100%; max-height: 420px; overflow-y: auto; padding: 16px 20px; background: var(--surface); text-align: left; }
+.preview-docx :deep(h1), .preview-docx :deep(h2), .preview-docx :deep(h3) { margin: 0.8em 0 0.4em; }
+.preview-docx :deep(p) { margin: 0.4em 0; line-height: 1.6; }
+.preview-docx :deep(table) { border-collapse: collapse; }
+.preview-docx :deep(td), .preview-docx :deep(th) { border: 1px solid var(--border); padding: 4px 8px; }
+.preview-pptx { width: 100%; display: flex; justify-content: center; }
 
 @media (max-width: 768px) {
   .kc-layout { grid-template-columns: 1fr; }

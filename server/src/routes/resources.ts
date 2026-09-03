@@ -23,7 +23,7 @@ import {
 import { paginate, pageMeta } from '../lib/pagination.js';
 import { config } from '../config.js';
 import { saveResourceFile, readResourceFile, deleteResourceFile } from '../lib/resourceStorage.js';
-import { inferResourceType } from '../lib/resourceParsing.js';
+import { inferResourceType, convertDocxToHtml } from '../lib/resourceParsing.js';
 import { scheduleResourceParse } from '../lib/resourceParseJob.js';
 
 const RESOURCE_TYPES = ['textbook', 'ppt', 'lesson_plan', 'image', 'mistake', 'document', 'other'] as const;
@@ -272,6 +272,27 @@ export async function registerResourceRoutes(app: FastifyInstance) {
       .send(buffer);
   });
 
+  // On-demand HTML preview for a .docx, so the detail dialog can show
+  // roughly-formatted content instead of the flattened ResourceChunk text.
+  // No new column/table: mammoth re-runs per request (see convertDocxToHtml)
+  // rather than persisting its output, so this stays purely additive to the
+  // existing search-chunk storage.
+  app.get('/resources/:resourceId/preview-html', async (req) => {
+    const userId = requireUser(req);
+    const { resourceId } = z.object({ resourceId: z.string().uuid() }).parse(req.params);
+    const resource = await requireResource(resourceId, userId);
+
+    const ext = resource.originalFilename.toLowerCase().split('.').pop() ?? '';
+    const isDocx = ext === 'docx' || resource.mimeType.includes('wordprocessingml');
+    if (!isDocx) {
+      throw ApiError.businessRule('仅 .docx 文件支持 HTML 预览');
+    }
+
+    const buffer = await readResourceFile(resource.storagePath);
+    const html = await convertDocxToHtml(buffer);
+    return { data: { html } };
+  });
+
   app.post('/resources/:resourceId/retry', async (req) => {
     const userId = requireUser(req);
     const { resourceId } = z.object({ resourceId: z.string().uuid() }).parse(req.params);
@@ -405,6 +426,18 @@ async function searchResources(
   if (q.collectionId) { filterClauses.push(`r.collection_id = $${i++}::uuid`); params.push(q.collectionId); }
   if (q.status) { filterClauses.push(`r.status = $${i++}::varchar`); params.push(q.status); }
   if (q.favorite) { filterClauses.push('r.is_favorite = true'); }
+  if (q.tagId) {
+    filterClauses.push(
+      `EXISTS (SELECT 1 FROM resource_tags rt2 WHERE rt2.resource_id = r.id AND rt2.tag_id = $${i++}::uuid)`,
+    );
+    params.push(q.tagId);
+  }
+  if (q.knowledgeNodeId) {
+    filterClauses.push(
+      `EXISTS (SELECT 1 FROM resource_knowledge_nodes rk WHERE rk.resource_id = r.id AND rk.knowledge_node_id = $${i++}::uuid)`,
+    );
+    params.push(q.knowledgeNodeId);
+  }
 
   const likeParamIndex = i++;
   params.push(likeTerm);

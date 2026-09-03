@@ -770,6 +770,12 @@ MIME/扩展名自动推断。
 
 响应 `200`：文件字节流，`Content-Disposition: attachment`；同时更新 `lastUsedAt`。
 
+### GET /resources/{resourceId}/preview-html — .docx 转 HTML 预览
+
+仅 `.docx`（`wordprocessingml`）可用，其他类型返回 `422 BUSINESS_RULE_VIOLATION`。
+用 mammoth 实时转换（不落库，不缓存），响应 `{ "data": { "html": "<p>...</p>" } }`，
+供详情弹窗渲染保留标题/段落格式的预览，区别于纯文本的 `ResourceChunk` 全文检索索引。
+
 ### POST /resources/{resourceId}/retry — 重新解析
 
 仅当 `status = failed` 时可用，重置为 `pending` 并重新调度后台解析任务。
