@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { DEFAULT_DAY_SCHEDULE } from './lib/daySchedule.js';
 
 export const config = {
@@ -31,6 +32,18 @@ export const config = {
   // offset is only the fallback used for a user who has never set one — do not
   // use it as if it applied to everyone; the server itself has no "local" zone.
   localTzOffsetMinutes: Number(process.env.LOCAL_TZ_OFFSET_MINUTES ?? 480),
+
+  // 教学知识中心 (Knowledge Center): where original resource files live on
+  // disk. Postgres only ever stores metadata/paths/extracted text — never file
+  // bytes (goal requirement). In docker-compose.yml this is a named volume
+  // mounted at this same path; locally it's a gitignored folder under server/.
+  // Resolved against cwd (both `npm run dev` and `node dist/main.js` are run
+  // from `server/`), not `import.meta.url`, since the latter would resolve to
+  // a different depth in dev (src/) vs build (dist/) output.
+  resourceStorageRoot: process.env.RESOURCE_STORAGE_ROOT ?? path.resolve(process.cwd(), 'data/resources'),
+  // Generous cap for teaching materials (PPT/PDF/Word/scans) — well above the
+  // 5MB excel-import limit above, which is a different multipart registration.
+  resourceMaxFileSizeBytes: Number(process.env.RESOURCE_MAX_FILE_SIZE_BYTES ?? 100 * 1024 * 1024),
 };
 
 export const pushEnabled = () => Boolean(config.vapidPublicKey && config.vapidPrivateKey);

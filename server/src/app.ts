@@ -21,6 +21,9 @@ import { registerExportRoutes } from './routes/exports.js';
 import { registerPushRoutes } from './routes/push.js';
 import { registerDeviceRoutes } from './routes/devices.js';
 import { registerWeatherRoutes } from './routes/weather.js';
+import { registerKnowledgeNodeRoutes } from './routes/knowledgeNodes.js';
+import { registerResourceCollectionRoutes } from './routes/resourceCollections.js';
+import { registerResourceRoutes } from './routes/resources.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -174,6 +177,9 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(registerPushRoutes, { prefix });
   await app.register(registerDeviceRoutes, { prefix });
   await app.register(registerWeatherRoutes, { prefix });
+  await app.register(registerKnowledgeNodeRoutes, { prefix });
+  await app.register(registerResourceCollectionRoutes, { prefix });
+  await app.register(registerResourceRoutes, { prefix });
 
   return app;
 }

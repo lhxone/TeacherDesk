@@ -42,6 +42,12 @@ COPY --from=build --chown=node:node /app/package.json ./
 # The engine target is pinned in schema.prisma (binaryTargets), so the CLI
 # resolves the vendored musl/openssl-3 engine without probing for another.
 
+# Pre-create the resource storage mount point with the right ownership: an
+# empty named volume inherits the permissions of the directory it's mounted
+# over, so this makes /data/resources writable by the unprivileged `node`
+# user below instead of defaulting to root:root.
+RUN mkdir -p /data/resources && chown -R node:node /data/resources
+
 # Run unprivileged; the base image already ships a `node` user.
 USER node
 

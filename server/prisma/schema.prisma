@@ -30,15 +30,19 @@ model User {
   updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt       DateTime? @map("deleted_at") @db.Timestamptz(6)
 
-  invitedBy         User?              @relation("UserInvites", fields: [invitedByUserId], references: [id], onDelete: SetNull)
-  invitees          User[]             @relation("UserInvites")
-  refreshTokens     RefreshToken[]
-  classes           Class[]
-  scheduleSlots     ScheduleSlot[]
-  events            Event[]
-  tags              Tag[]
-  pushSubscriptions PushSubscription[]
-  sentReminders     SentReminder[]
+  invitedBy           User?                @relation("UserInvites", fields: [invitedByUserId], references: [id], onDelete: SetNull)
+  invitees            User[]               @relation("UserInvites")
+  refreshTokens       RefreshToken[]
+  classes             Class[]
+  scheduleSlots       ScheduleSlot[]
+  events              Event[]
+  tags                Tag[]
+  pushSubscriptions   PushSubscription[]
+  sentReminders       SentReminder[]
+  knowledgeNodes      KnowledgeNode[]
+  resources           Resource[]
+  resourceTags        ResourceTag[]
+  resourceCollections ResourceCollection[]
 
   @@map("users")
 }
@@ -157,8 +161,9 @@ model Tag {
   color     String   @default("#10B981") @db.VarChar(16)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  studentTags StudentTag[]
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  studentTags  StudentTag[]
+  resourceTags ResourceTag[]
 
   @@unique([userId, name])
   @@map("tags")
@@ -400,4 +405,190 @@ model GroupMember {
 
   @@id([groupId, studentId])
   @@map("group_members")
+}
+
+// ============================================================================
+// 教学知识中心 (Teaching Knowledge Center)
+// ============================================================================
+//
+// Resource is the single unified model for every kind of teaching material
+// (textbook / ppt / lesson plan / image / mistake scan / other document).
+// Type-specific behaviour (parsing, chunking) branches on `type` and `mimeType`
+// in application code rather than via separate tables, so search, tagging,
+// favorites, collections and knowledge-point linking all work uniformly
+// across types (per the goal's "统一 Resource 模型" requirement).
+//
+// Full-text search is native Postgres pg_trgm — no Elasticsearch, no vector
+// DB. Postgres's tsvector text-search configs (including 'simple') tokenize
+// on Unicode word boundaries, which turns an entire run of Chinese
+// characters into a single lexeme — substring queries against it never
+// match, and true CJK segmentation needs a third-party parser extension
+// (zhparser) that isn't in the stock postgres:15-alpine image. pg_trgm
+// indexes character trigrams instead of words, so `ILIKE '%关键词%'` against
+// resources.title/original_filename and resource_chunks.content is
+// GIN-index-accelerated and scriptagnostic; see the migration for the
+// extension + index DDL and routes/resources.ts for the query.
+//
+// Extensibility for future phases (question bank / QuestionAttempt / OCR /
+// pgvector RAG) is designed in from the start:
+//   - ResourceChunk is the natural unit to later attach an `embedding
+//     vector(N)` column (pgvector) for RAG retrieval, and/or an
+//     ocrText/ocrStatus pair for image OCR, without touching Resource.
+//   - Resource.type having a 'mistake' variant plus `metadata` Json lets a
+//     later 题库/错题 module store question stem, options and answer without
+//     a schema migration; a dedicated Question/QuestionAttempt model can add
+//     `resourceId` FKs back into this table when that phase starts.
+
+model KnowledgeNode {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  parentId  String?   @map("parent_id") @db.Uuid
+  name      String    @db.VarChar(128)
+  subject   String?   @db.VarChar(32)
+  grade     String?   @db.VarChar(32)
+  sortOrder Int       @default(0) @map("sort_order")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  user              User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent            KnowledgeNode?          @relation("KnowledgeNodeTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children          KnowledgeNode[]         @relation("KnowledgeNodeTree")
+  resourceKnowledge ResourceKnowledgeNode[]
+
+  @@index([userId, parentId])
+  @@map("knowledge_nodes")
+}
+
+model ResourceCollection {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  parentId  String?   @map("parent_id") @db.Uuid
+  name      String    @db.VarChar(128)
+  sortOrder Int       @default(0) @map("sort_order")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  user      User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent    ResourceCollection?  @relation("ResourceCollectionTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children  ResourceCollection[] @relation("ResourceCollectionTree")
+  resources Resource[]
+
+  @@index([userId, parentId])
+  @@map("resource_collections")
+}
+
+// Free-form label reused across the app; StudentTag already links Tag to
+// Student, ResourceTag links the same Tag rows to Resource so tag management
+// (create/rename/delete, color) stays in one place (routes/tags.ts).
+model ResourceTag {
+  resourceId String   @map("resource_id") @db.Uuid
+  tagId      String   @map("tag_id") @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  resource Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  tag      Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([resourceId, tagId])
+  @@index([tagId])
+  @@map("resource_tags")
+}
+
+model ResourceKnowledgeNode {
+  resourceId      String   @map("resource_id") @db.Uuid
+  knowledgeNodeId String   @map("knowledge_node_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  resource      Resource      @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  knowledgeNode KnowledgeNode @relation(fields: [knowledgeNodeId], references: [id], onDelete: Cascade)
+
+  @@id([resourceId, knowledgeNodeId])
+  @@index([knowledgeNodeId])
+  @@map("resource_knowledge_nodes")
+}
+
+model Resource {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+
+  // textbook / ppt / lesson_plan / image / mistake / document / other
+  type    String  @db.VarChar(16)
+  title   String  @db.VarChar(255)
+  subject String? @db.VarChar(32)
+  grade   String? @db.VarChar(32)
+  note    String?
+
+  collectionId String? @map("collection_id") @db.Uuid
+
+  // Original filename as uploaded, kept for search/display even though the
+  // file on disk is renamed to its id (see storagePath).
+  originalFilename String  @map("original_filename") @db.VarChar(255)
+  mimeType         String  @map("mime_type") @db.VarChar(128)
+  fileSize         BigInt  @map("file_size")
+  // Path is relative to the resources storage root (config.resourceStorageRoot),
+  // never absolute — keeps the DB portable across hosts/containers.
+  storagePath      String  @map("storage_path") @db.VarChar(512)
+  // SHA-256 of the file content; lets a future upload short-circuit into
+  // "already have this file" without re-parsing.
+  checksum         String? @db.VarChar(64)
+
+  // pending -> parsing -> ready | failed. Images/plain types that need no
+  // extraction go straight to 'ready' on upload.
+  status     String  @default("pending") @db.VarChar(16)
+  parseError String? @map("parse_error")
+  // Page count (PPT/PDF) or paragraph/section count (Word), when known.
+  pageCount  Int?    @map("page_count")
+
+  isFavorite Boolean   @default(false) @map("is_favorite")
+  lastUsedAt DateTime? @map("last_used_at") @db.Timestamptz(6)
+
+  // Free-form extension point for future phases (e.g. mistake question stem/
+  // options/answer, OCR status) without another migration.
+  metadata Json @default("{}")
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  user       User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  collection ResourceCollection?     @relation(fields: [collectionId], references: [id], onDelete: SetNull)
+  chunks     ResourceChunk[]
+  tags       ResourceTag[]
+  knowledge  ResourceKnowledgeNode[]
+
+  @@index([userId, type, status])
+  @@index([userId, collectionId])
+  @@index([userId, isFavorite])
+  @@index([userId, lastUsedAt])
+  @@map("resources")
+}
+
+// One row per page (PPT/PDF) or section/paragraph-group (Word) of extracted
+// text, so a search hit can be pointed back at "第 12 页" / "第 3 章" instead
+// of just the parent file. `embedding` for pgvector-based RAG retrieval is a
+// deliberately-deferred future column on this same table (see header note).
+model ResourceChunk {
+  id         String @id @default(uuid()) @db.Uuid
+  resourceId String @map("resource_id") @db.Uuid
+
+  // Ordinal position within the resource, 0-based, used for stable ordering
+  // regardless of how pageNumber/sectionLabel are formatted.
+  ordinal      Int     @db.Integer
+  // PPT/PDF page number (1-based) when applicable.
+  pageNumber   Int?    @map("page_number")
+  // Word heading / chapter title, or a short auto-generated label, when
+  // applicable ("第一章 有理数").
+  sectionLabel String? @map("section_label") @db.VarChar(255)
+  content      String
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  resource Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+
+  @@unique([resourceId, ordinal])
+  @@index([resourceId, pageNumber])
+  @@map("resource_chunks")
 }

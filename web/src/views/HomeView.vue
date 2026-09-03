@@ -90,6 +90,11 @@ onMounted(async () => {
 
     <WeatherCard />
 
+    <nav class="quick-links">
+      <RouterLink :to="{ name: 'tools' }" class="quick-link">课堂工具</RouterLink>
+      <RouterLink :to="{ name: 'knowledge-center' }" class="quick-link">知识中心</RouterLink>
+    </nav>
+
     <div v-if="loading" class="empty">加载中…</div>
 
     <div v-else class="stack">
@@ -237,4 +242,17 @@ onMounted(async () => {
 .class-card { position: relative; color: inherit; overflow: hidden; }
 .class-color { position: absolute; inset: 0 auto 0 0; width: 4px; }
 .class-name { font-weight: 600; margin-bottom: 2px; }
+
+.quick-links { display: flex; gap: 10px; margin: 4px 0 16px; }
+.quick-link {
+  flex: 1;
+  text-align: center;
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-weight: 500;
+}
+.quick-link:hover { background: var(--hover-tint); }
 </style>

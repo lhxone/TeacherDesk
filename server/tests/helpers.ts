@@ -17,6 +17,8 @@ export async function resetDb() {
       group_members, groups, grouping_plans,
       lottery_records, scores, exams, exam_sessions,
       seat_assignments, seating_charts,
+      resource_knowledge_nodes, resource_tags, resource_chunks, resources,
+      resource_collections, knowledge_nodes,
       student_tags, tags, students,
       event_occurrences, events, schedule_slots, classes,
       refresh_tokens, users
@@ -157,6 +159,39 @@ export function multipartFile(
   return {
     headers: { 'content-type': `multipart/form-data; boundary=${boundary}` },
     payload: Buffer.concat([head, buffer, tail]),
+  };
+}
+
+/**
+ * Build a multipart/form-data body carrying one file field ("file") plus
+ * arbitrary extra text fields, for exercising resource-upload endpoints.
+ */
+export function multipartFileWithFields(
+  buffer: Buffer,
+  filename: string,
+  fields: Record<string, string> = {},
+  contentType = 'application/octet-stream',
+): { headers: Record<string, string>; payload: Buffer } {
+  const boundary = '----testboundary';
+  const parts: Buffer[] = [];
+  for (const [key, value] of Object.entries(fields)) {
+    parts.push(
+      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${key}"\r\n\r\n${value}\r\n`),
+    );
+  }
+  parts.push(
+    Buffer.from(
+      `--${boundary}\r\n` +
+        `Content-Disposition: form-data; name="file"; filename="${filename}"\r\n` +
+        `Content-Type: ${contentType}\r\n\r\n`,
+    ),
+  );
+  parts.push(buffer);
+  parts.push(Buffer.from(`\r\n--${boundary}--\r\n`));
+
+  return {
+    headers: { 'content-type': `multipart/form-data; boundary=${boundary}` },
+    payload: Buffer.concat(parts),
   };
 }
 

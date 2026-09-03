@@ -182,6 +182,15 @@ LOCAL_TZ_OFFSET_MINUTES=480
 3. 状态都正常但仍收不到：`docker compose logs api | grep "web push delivery failed"`，
    `statusCode` 为 `403` 通常是 VAPID 密钥被换过且前端缓存了旧订阅（新版本会自愈，
    让用户刷新页面即可）；`410` 是订阅已失效，会自动清理。
+
+### 3.4.2 教学知识中心：资源文件存储
+
+上传的教材/PPT/教案/图片等原始文件存在磁盘上，PostgreSQL 只存路径和解析出的文本。
+`docker-compose.yml` 已声明一个独立的命名卷 `resource-data`，挂载到 api 容器的
+`/data/resources`（对应环境变量 `RESOURCE_STORAGE_ROOT`，默认即此路径，通常不需要改）。
+
+无需额外操作即可使用；需要备份时把这个卷和 `db-data` 一起备份即可
+（`docker run --rm -v teacherdesk_resource-data:/data -v $(pwd):/backup alpine tar czf /backup/resources.tar.gz /data`）。
 4. 设置页「发送测试通知」返回"已发送到 N 台设备"但收不到 → 多为系统/浏览器层面
    屏蔽了通知（勿扰模式、通知权限、省电策略）。
 

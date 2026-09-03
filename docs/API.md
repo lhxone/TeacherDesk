@@ -713,6 +713,101 @@ DELETE 级联软删除批次下所有科目及其成绩。
 
 响应 `200`：`{ "data": { "matched": 2, "skipped": ["未知同学"], "scores": [{ "studentId": "stu_a", "score": 88, "isAbsent": false }] } }`
 
+---
+
+## 11. 教学知识中心 Knowledge Center
+
+### GET /resources — 资源列表 / 搜索
+
+查询参数：`type`（textbook/ppt/lesson_plan/image/mistake/document/other）、`subject`、`grade`、
+`collectionId`、`tagId`、`knowledgeNodeId`、`status`（pending/parsing/ready/failed）、
+`favorite`（true 只看收藏）、`recent`（true 按最近使用排序）、`q`（全文搜索关键字，见下）、
+`page`/`pageSize`。
+
+不带 `q` 时为普通筛选列表，按 `createdAt`（或 `recent=true` 时按 `lastUsedAt`）倒序。
+
+带 `q` 时走全文搜索（PostgreSQL `pg_trgm`，标题 / 原始文件名 / 标签名 / 正文内容），响应每条额外带
+`matchedChunk`（命中来自正文时，指向具体页码/章节）：
+
+```json
+{
+  "data": [
+    {
+      "id": "res_…", "type": "ppt", "title": "一元二次方程复习课", "status": "ready",
+      "tags": [{ "id": "tag_1", "name": "重点", "color": "#10B981" }],
+      "knowledgeNodes": [{ "id": "kn_1", "name": "一元二次方程" }],
+      "matchedChunk": { "id": "chk_3", "pageNumber": 12, "sectionLabel": null, "snippet": "…勾股定理的证明与应用…" }
+    }
+  ],
+  "meta": { "page": 1, "pageSize": 20, "total": 1, "totalPages": 1 }
+}
+```
+
+### POST /resources — 上传资源
+
+请求：`multipart/form-data`，字段 `file`（必填，原始文件）+ 可选文本字段
+`title`、`type`、`subject`、`grade`、`note`、`collectionId`、`tagIds`（逗号分隔）、
+`knowledgeNodeIds`（逗号分隔）。未填 `title` 时用文件名（去扩展名）；未填 `type` 时按
+MIME/扩展名自动推断。
+
+响应 `201`：资源详情，`status` 初始为 `pending`（不可解析的类型如图片直接为 `ready`）；上传后立即在
+后台异步任务中解析文本，无需轮询即可继续使用其他接口。
+
+### GET /resources/{resourceId} — 资源详情
+
+额外返回 `chunks`（该资源解析出的全部分段，按 `ordinal` 排序）。
+
+### PATCH /resources/{resourceId} — 更新元数据 / 标签 / 知识点 / 收藏
+
+请求体任意字段可选：`title`、`subject`、`grade`、`note`、`collectionId`、`isFavorite`、`type`、
+`tagIds`（整体替换）、`knowledgeNodeIds`（整体替换）。
+
+### POST /resources/{resourceId}/touch — 标记「最近使用」
+
+无请求体；更新 `lastUsedAt`，供「最近使用」列表（`GET /resources?recent=true`）使用。前端在预览/下载时调用。
+
+### GET /resources/{resourceId}/download — 下载原始文件
+
+响应 `200`：文件字节流，`Content-Disposition: attachment`；同时更新 `lastUsedAt`。
+
+### POST /resources/{resourceId}/retry — 重新解析
+
+仅当 `status = failed` 时可用，重置为 `pending` 并重新调度后台解析任务。
+
+### DELETE /resources/{resourceId} — 删除资源
+
+软删除；同时尽力删除磁盘上的原始文件（DB 行是唯一真相来源，删除文件失败不影响接口成功）。
+
+---
+
+### GET /knowledge-nodes — 知识点列表（扁平，含 parentId）
+
+查询参数：`subject`、`grade`。响应每项含 `resourceCount`（关联资源数）。
+
+### POST /knowledge-nodes — 新建知识点
+
+请求：`{ "name": "一元二次方程", "parentId": null, "subject": "数学", "grade": "九年级" }`
+
+### PATCH /knowledge-nodes/{nodeId} — 更新 / 移动知识点
+
+移动到自己的子孙节点下会返回 `422 BUSINESS_RULE_VIOLATION`（防止成环）。
+
+### DELETE /knowledge-nodes/{nodeId} — 删除知识点
+
+软删除，应用层递归软删除其全部子知识点；关联资源不受影响，只是解除该知识点标记。
+
+---
+
+### GET /resource-collections — 文件夹列表（扁平，含 parentId）
+
+### POST /resource-collections — 新建文件夹
+
+### PATCH /resource-collections/{collectionId} — 更新 / 移动文件夹
+
+### DELETE /resource-collections/{collectionId} — 删除文件夹
+
+软删除，应用层递归软删除其全部子文件夹，并将其中的资源 `collectionId` 置空（资源本身不删除）。
+
 仅返回匹配结果，不落库——前端合并进当前录入表格后仍需调用 `PUT /exams/{examId}/scores` 保存。
 `score > fullScore` → `400 VALIDATION_ERROR`；一个学生都未匹配到 → `400 VALIDATION_ERROR`。
 

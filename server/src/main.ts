@@ -1,10 +1,19 @@
+// Side-effecting import: must be the first import in this file so its
+// process.env writes land before ./app.js's own import chain evaluates
+// config.js. See loadEnv.ts for why a plain function call here would NOT be
+// early enough (ESM runs every import's module graph before this file's own
+// statements, regardless of import order vs. statement order).
+import './loadEnv.js';
+
 import { buildApp } from './app.js';
 import { config, pushEnabled } from './config.js';
 import { prisma } from './db.js';
 import { startReminderScheduler, stopReminderScheduler } from './lib/reminder.js';
+import { setResourceParseLogger } from './lib/resourceParseJob.js';
 
 async function main() {
   const app = await buildApp();
+  setResourceParseLogger(app.log);
 
   const shutdown = async (signal: string) => {
     app.log.info(`${signal} received, shutting down`);

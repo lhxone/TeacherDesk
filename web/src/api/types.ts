@@ -329,3 +329,76 @@ export type GroupResult = {
   members: { id: string; name: string; gender?: string | null; score?: number | null }[];
   avgScore: number | null;
 };
+
+// ---------- 教学知识中心 (Knowledge Center) ----------
+
+export type ResourceType = 'textbook' | 'ppt' | 'lesson_plan' | 'image' | 'mistake' | 'document' | 'other';
+export type ResourceStatus = 'pending' | 'parsing' | 'ready' | 'failed';
+
+export type KnowledgeNode = {
+  id: string;
+  name: string;
+  parentId: string | null;
+  subject: string | null;
+  grade: string | null;
+  sortOrder: number;
+  resourceCount: number;
+};
+
+export type ResourceCollection = {
+  id: string;
+  name: string;
+  parentId: string | null;
+  sortOrder: number;
+  resourceCount: number;
+};
+
+export type ResourceChunk = {
+  id: string;
+  ordinal: number;
+  pageNumber: number | null;
+  sectionLabel: string | null;
+  content: string;
+};
+
+export type Resource = {
+  id: string;
+  type: ResourceType;
+  title: string;
+  subject: string | null;
+  grade: string | null;
+  note: string | null;
+  collection: { id: string; name: string } | null;
+  originalFilename: string;
+  mimeType: string;
+  fileSize: number;
+  status: ResourceStatus;
+  parseError: string | null;
+  pageCount: number | null;
+  isFavorite: boolean;
+  lastUsedAt: string | null;
+  tags: Tag[];
+  knowledgeNodes: { id: string; name: string }[];
+  createdAt: string;
+  updatedAt: string;
+  chunks?: ResourceChunk[];
+  /** Present only on full-text search results (GET /resources?q=...). */
+  matchedChunk?: { id: string; pageNumber: number | null; sectionLabel: string | null; snippet: string | null } | null;
+};
+
+export const RESOURCE_TYPE_LABELS: Record<ResourceType, string> = {
+  textbook: '教材',
+  ppt: 'PPT',
+  lesson_plan: '教案',
+  image: '图片',
+  mistake: '错题',
+  document: '文档',
+  other: '其他',
+};
+
+export const RESOURCE_STATUS_LABELS: Record<ResourceStatus, string> = {
+  pending: '待解析',
+  parsing: '解析中',
+  ready: '就绪',
+  failed: '解析失败',
+};
