@@ -769,12 +769,9 @@ MIME/扩展名自动推断。
 ### GET /resources/{resourceId}/download — 下载原始文件
 
 响应 `200`：文件字节流，`Content-Disposition: attachment`；同时更新 `lastUsedAt`。
-
-### GET /resources/{resourceId}/preview-html — .docx 转 HTML 预览
-
-仅 `.docx`（`wordprocessingml`）可用，其他类型返回 `422 BUSINESS_RULE_VIOLATION`。
-用 mammoth 实时转换（不落库，不缓存），响应 `{ "data": { "html": "<p>...</p>" } }`，
-供详情弹窗渲染保留标题/段落格式的预览，区别于纯文本的 `ResourceChunk` 全文检索索引。
+详情弹窗的图片/PDF/Word/PPT 可视化预览也复用这个接口取原始文件字节，在前端用
+`docx-preview`/`pptx-preview` 等纯前端库渲染，而不是额外的服务端转换接口——
+区别于纯文本的 `ResourceChunk` 全文检索索引，是两条独立的路径。
 
 ### POST /resources/{resourceId}/retry — 重新解析
 

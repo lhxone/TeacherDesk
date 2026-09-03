@@ -146,19 +146,6 @@ function collectTagText(node: any, tag: string, out: string[]): void {
   }
 }
 
-/**
- * Convert a .docx buffer to HTML for the preview dialog. Deliberately not
- * persisted anywhere (no new column/table) — the preview endpoint calls this
- * on demand and mammoth is fast enough (well under a second for a typical
- * lesson plan) that re-running it per preview open is cheaper than adding
- * storage for it. Separate from extractDocx() below, which produces the
- * plain-text search chunks and must keep working even if this changes.
- */
-export async function convertDocxToHtml(buffer: Buffer): Promise<string> {
-  const { value: html } = await mammoth.convertToHtml({ buffer });
-  return html;
-}
-
 async function extractDocx(buffer: Buffer): Promise<ExtractionResult> {
   const { value: html } = await mammoth.convertToHtml({ buffer });
 
