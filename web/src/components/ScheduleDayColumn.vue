@@ -10,7 +10,7 @@
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import type { DayScheduleItem, EventItem, ScheduleSlot } from '@/api/types';
-import { instantMinutes, packColumns, toMinutes, useScheduleLayout } from '@/composables/useScheduleLayout';
+import { instantMinutes, localIsoDate, packColumns, toMinutes, useScheduleLayout } from '@/composables/useScheduleLayout';
 
 const props = defineProps<{
   /** 1 = Monday … 7 = Sunday, used only to open the "add lesson" form at the right weekday. */
@@ -89,12 +89,7 @@ onMounted(() => {
 });
 onUnmounted(() => clearInterval(timer));
 
-function isoDate(d: Date): string {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-const isToday = computed(() => props.date === isoDate(now.value));
+const isToday = computed(() => props.date === localIsoDate(now.value));
 const nowTop = computed(() => {
   if (!isToday.value) return null;
   const top = timeToTop(now.value.getHours() * 60 + now.value.getMinutes());

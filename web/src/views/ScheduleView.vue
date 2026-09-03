@@ -7,7 +7,7 @@ import ModalDialog from '@/components/ModalDialog.vue';
 import EventDialog from '@/components/EventDialog.vue';
 import ScheduleDayColumn from '@/components/ScheduleDayColumn.vue';
 import type { AgendaDay, Envelope, EventItem, ScheduleSlot } from '@/api/types';
-import { instantMinutes, useScheduleLayout } from '@/composables/useScheduleLayout';
+import { instantMinutes, localIsoDate, useScheduleLayout } from '@/composables/useScheduleLayout';
 
 const auth = useAuthStore();
 const classStore = useClassStore();
@@ -21,6 +21,15 @@ const error = ref('');
 // Mobile defaults to the day view; desktop shows the full week (PRD §3.4.1).
 const view = ref<'week' | 'day'>(window.innerWidth > 768 ? 'week' : 'day');
 const currentDate = ref(new Date().toISOString().slice(0, 10));
+
+// Marks today's column in the week header (see week-head-day.today below).
+// A plain constant, not reactive to the clock: this label only needs to be
+// right for however long the page stays open in one sitting, and re-deriving
+// it on a timer would be one more moving part for a once-a-day boundary that
+// a full page reload already resets — unlike the current-time line in
+// ScheduleDayColumn, which visibly moves within a single sitting and does
+// need the 30s tick.
+const todayIso = localIsoDate(new Date());
 
 const showForm = ref(false);
 const editingSlot = ref<ScheduleSlot | null>(null);
@@ -295,8 +304,16 @@ onMounted(async () => {
              all-day/no-end-time todos have no minute range to position by. -->
         <div class="week-head">
           <div class="time-gutter-head" />
-          <div v-for="d in visibleDays" :key="d" class="week-head-day">
-            <div class="week-head-weekday">{{ WEEKDAYS[d - 1] }}</div>
+          <div
+            v-for="d in visibleDays"
+            :key="d"
+            class="week-head-day"
+            :class="{ today: weekAgenda.find((a) => a.weekday === d)?.date === todayIso }"
+          >
+            <div class="week-head-weekday">
+              {{ WEEKDAYS[d - 1] }}
+              <span v-if="weekAgenda.find((a) => a.weekday === d)?.date === todayIso" class="today-badge">今天</span>
+            </div>
             <div class="week-head-date">{{ weekAgenda.find((a) => a.weekday === d)?.date.slice(5) ?? '' }}</div>
           </div>
         </div>
@@ -380,8 +397,11 @@ onMounted(async () => {
       <div v-if="agenda" class="week-frame">
         <div class="week-head">
           <div class="time-gutter-head" />
-          <div class="week-head-day">
-            <div class="week-head-weekday">{{ WEEKDAYS[agenda.weekday - 1] }}</div>
+          <div class="week-head-day" :class="{ today: agenda.date === todayIso }">
+            <div class="week-head-weekday">
+              {{ WEEKDAYS[agenda.weekday - 1] }}
+              <span v-if="agenda.date === todayIso" class="today-badge">今天</span>
+            </div>
             <div class="week-head-date">
               {{ agenda.date.slice(5) }} · {{ agenda.weekParity === 'odd' ? '单周' : '双周' }}
             </div>
@@ -589,6 +609,21 @@ onMounted(async () => {
   font-weight: 600;
   text-align: center;
   border-left: 1px solid var(--border);
+}
+
+.week-head-day.today { background: var(--brand-soft); }
+.week-head-day.today .week-head-weekday { color: var(--brand-dark); }
+
+.today-badge {
+  display: inline-block;
+  margin-left: 3px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  vertical-align: middle;
 }
 
 .week-head-date {

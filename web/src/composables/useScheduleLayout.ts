@@ -21,6 +21,17 @@ export function instantMinutes(iso: string): number {
   return d.getHours() * 60 + d.getMinutes();
 }
 
+/** "YYYY-MM-DD" in the browser's local time zone — deliberately not
+ * `Date.toISOString().slice(0, 10)`, which is UTC and would misidentify
+ * "today" for part of the day in time zones ahead of/behind UTC (e.g. still
+ * "yesterday" in UTC at 2am in UTC+8). Used to compare a calendar day's date
+ * string against "now" for the current-time line (ScheduleDayColumn) and the
+ * week header's today marker (ScheduleView). */
+export function localIsoDate(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 export type RowLayout = { top: number; height: number };
 export type PositionStyle = { top: string; height: string };
 
