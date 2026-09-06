@@ -207,6 +207,65 @@ describe('request', () => {
     await expect(purgeApiCaches()).resolves.toBeUndefined();
   });
 
+  it('handles a non-JSON error body (e.g. nginx HTML error page) without throwing a parse error', async () => {
+    const htmlResponse = {
+      ok: false,
+      status: 413,
+      text: async () => '<html><body><h1>413 Request Entity Too Large</h1></body></html>',
+    } as Response;
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(htmlResponse));
+
+    await expect(api.post('/resources', {})).rejects.toMatchObject({
+      status: 413,
+      code: 'INTERNAL_ERROR',
+    });
+  });
+
+  it('does not clear tokens when the refresh call itself hits a network error', async () => {
+    tokenStore.set('expired', 'refresh-1');
+    const onFail = vi.fn();
+    setAuthFailureHandler(onFail);
+
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/auth/refresh')) return Promise.reject(new TypeError('offline'));
+      return Promise.resolve(jsonResponse(401, { error: { code: 'UNAUTHENTICATED' } }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    // Being offline while the access token happens to be stale must not look
+    // like the server rejecting the session — that would wipe a refresh
+    // token that's still perfectly valid.
+    await expect(api.get('/classes')).rejects.toMatchObject({ code: 'NETWORK_ERROR' });
+    expect(tokenStore.access).toBe('expired');
+    expect(tokenStore.refresh).toBe('refresh-1');
+    expect(onFail).not.toHaveBeenCalled();
+
+    setAuthFailureHandler(() => {});
+  });
+
+  it('uploads a single-field file through the same refresh-and-retry path as JSON requests', async () => {
+    tokenStore.set('expired', 'refresh-1');
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(401, { error: { code: 'UNAUTHENTICATED' } }))
+      .mockResolvedValueOnce(
+        jsonResponse(200, { data: { accessToken: 'fresh', refreshToken: 'refresh-2' } }),
+      )
+      .mockResolvedValueOnce(jsonResponse(201, { data: { id: 'r1' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const file = new File(['a,b'], 'roster.xlsx');
+    const result = await api.upload('/students/import', file);
+
+    expect((result as { data: { id: string } }).data.id).toBe('r1');
+    expect(tokenStore.access).toBe('fresh');
+    // The retried request must still carry a FormData body, not JSON.
+    const retriedCall = fetchMock.mock.calls[2][1];
+    expect(retriedCall.body).toBeInstanceOf(FormData);
+    expect(retriedCall.headers['Content-Type']).toBeUndefined();
+  });
+
   it('does not attempt a refresh when no refresh token is stored', async () => {
     const fetchMock = vi
       .fn()

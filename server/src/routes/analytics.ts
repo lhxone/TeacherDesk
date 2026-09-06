@@ -118,7 +118,7 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
     await requireClass(classId, userId);
     const thresholds = await thresholdsFor(userId);
 
-    const exams = await prisma.exam.findMany({
+    const examsDesc = await prisma.exam.findMany({
       where: {
         classId,
         deletedAt: null,
@@ -136,10 +136,15 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
             }
           : {}),
       },
-      orderBy: { examDate: 'asc' },
+      // Take the most recent `limit` exams first (desc), then re-sort them
+      // ascending for display — ordering asc-then-take would instead return
+      // the OLDEST `limit` exams, so a class with more than `limit` exams
+      // would never show its newest ones on the trend chart.
+      orderBy: { examDate: 'desc' },
       take: q.limit,
       include: { scores: true },
     });
+    const exams = examsDesc.slice().reverse();
 
     return {
       data: {
@@ -261,17 +266,22 @@ export async function registerAnalyticsRoutes(app: FastifyInstance) {
     });
     const subjects = [...new Set(allExams.map((e) => e.subject).filter((s): s is string => s !== null))];
 
-    const exams = await prisma.exam.findMany({
+    // Take the most recent `limit` exams first (desc), then re-sort them
+    // ascending below — see the equivalent comment in /analytics/class/:id/trend
+    // above for why asc-then-take would strand the trend/radar on stale exams
+    // once a student has sat more than `limit` of them.
+    const examsDesc = await prisma.exam.findMany({
       where: {
         classId: student.classId,
         deletedAt: null,
         ...(q.subject === '__all__' ? {} : q.subject ? { subject: q.subject } : {}),
         scores: { some: { studentId } },
       },
-      orderBy: { examDate: 'asc' },
+      orderBy: { examDate: 'desc' },
       take: q.limit,
       include: { scores: true },
     });
+    const exams = examsDesc.slice().reverse();
 
     const trend = exams
       .map((e) => {

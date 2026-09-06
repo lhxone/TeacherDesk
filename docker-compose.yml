@@ -73,6 +73,11 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-teacherdesk}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-teacherdesk}?schema=public
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       BCRYPT_ROUNDS: ${BCRYPT_ROUNDS:-12}
+      # Bootstrap invite code for registering the very first account (only
+      # usable while the users table is empty). Without this mapping, a fresh
+      # deployment reads an empty value here regardless of what's set in
+      # .env, and registration is rejected for everyone.
+      INITIAL_INVITE_CODE: ${INITIAL_INVITE_CODE:-}
       # Same-origin deployment: nginx proxies /api, so the browser never makes
       # a cross-origin request. Kept explicit as defence in depth.
       CORS_ORIGINS: ${PUBLIC_ORIGIN:-https://t-desk.buildlink.cc}

@@ -1,4 +1,4 @@
-import { api } from '@/api/client';
+import { api, request } from '@/api/client';
 import type {
   Envelope,
   KnowledgeNode,
@@ -67,11 +67,13 @@ export const resourcesApi = {
   },
 
   /**
-   * Multipart upload. Uses fetch directly (not api.upload, which is fixed to
-   * a single "file" field with no extra text fields) so title/type/subject/
-   * grade/collectionId/tagIds/knowledgeNodeIds can ride along in one request.
+   * Multipart upload. Uses `request()` directly (not api.upload, which is
+   * fixed to a single "file" field with no extra text fields) so
+   * title/type/subject/grade/collectionId/tagIds/knowledgeNodeIds can ride
+   * along in one request — and, going through `request()`, an expired access
+   * token gets the same refresh-and-retry treatment as any other endpoint.
    */
-  async upload(
+  upload(
     file: File,
     fields: Partial<{
       title: string;
@@ -95,19 +97,7 @@ export const resourcesApi = {
     if (fields.knowledgeNodeIds?.length) form.append('knowledgeNodeIds', fields.knowledgeNodeIds.join(','));
     form.append('file', file);
 
-    const { tokenStore } = await import('@/api/client');
-    const headers: Record<string, string> = {};
-    if (tokenStore.access) headers.Authorization = `Bearer ${tokenStore.access}`;
-
-    const res = await fetch('/api/v1/resources', { method: 'POST', headers, body: form });
-    const text = await res.text();
-    const body = text ? JSON.parse(text) : {};
-    if (!res.ok) {
-      const { ApiError } = await import('@/api/client');
-      const err = body.error ?? {};
-      throw new ApiError(res.status, err.code ?? 'INTERNAL_ERROR', err.message ?? '上传失败', err.details);
-    }
-    return body as Envelope<Resource>;
+    return request<Envelope<Resource>>('/resources', { method: 'POST', body: form });
   },
 };
 

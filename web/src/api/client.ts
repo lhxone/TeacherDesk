@@ -23,6 +23,10 @@ const BASE = '/api/v1';
 const ACCESS_KEY = 'td_access_token';
 const REFRESH_KEY = 'td_refresh_token';
 const SESSION_KEY = 'td_session_id';
+// A snapshot of the last `/auth/me` response, so a page load with no network
+// (offline start, not a dead/expired token) can still know who's signed in
+// instead of treating "can't reach the server" the same as "not logged in".
+const USER_SNAPSHOT_KEY = 'td_user_snapshot';
 
 export const tokenStore = {
   get access() {
@@ -44,6 +48,25 @@ export const tokenStore = {
     localStorage.removeItem(ACCESS_KEY);
     localStorage.removeItem(REFRESH_KEY);
     localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(USER_SNAPSHOT_KEY);
+  },
+  /** Persist the signed-in user so it survives a reload made with no network. */
+  saveUserSnapshot(user: unknown) {
+    try {
+      localStorage.setItem(USER_SNAPSHOT_KEY, JSON.stringify(user));
+    } catch {
+      // Storage can be unavailable (private mode, quota); offline restore
+      // just won't have a snapshot to use, which is a soft failure.
+    }
+  },
+  /** Read back the last snapshot, or null if there isn't one / it's corrupt. */
+  readUserSnapshot<T = unknown>(): T | null {
+    try {
+      const raw = localStorage.getItem(USER_SNAPSHOT_KEY);
+      return raw ? (JSON.parse(raw) as T) : null;
+    } catch {
+      return null;
+    }
   },
 };
 
@@ -74,11 +97,42 @@ export async function purgeApiCaches(): Promise<void> {
   }
 }
 
-let refreshInFlight: Promise<boolean> | null = null;
+/**
+ * Parse a response body as the documented JSON error envelope, tolerating a
+ * body that isn't JSON at all — e.g. nginx's own HTML error page for a 413
+ * (request too large) or 502/504, which never reaches the API's JSON error
+ * handler. `JSON.parse` on that HTML would throw and mask the real HTTP
+ * status behind a confusing syntax error.
+ */
+function parseJsonBody(text: string): { error?: { code?: string; message?: string; details?: ApiErrorDetail[] } } {
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {};
+  }
+}
 
-async function refreshTokens(): Promise<boolean> {
+function describeNonJsonError(status: number): string {
+  if (status === 413) return '文件过大，请压缩后重试';
+  if (status === 502 || status === 503 || status === 504) return '服务暂时不可用，请稍后重试';
+  return '请求失败';
+}
+
+/**
+ * 'ok': refreshed. 'rejected': the server explicitly refused the refresh
+ * token (expired/revoked/reused) — the session is genuinely over.
+ * 'network-error': the request never got a server answer at all (offline, DNS,
+ * tunnel down) — the refresh token itself might still be perfectly good, so
+ * this must NOT be treated the same as 'rejected'.
+ */
+type RefreshOutcome = 'ok' | 'rejected' | 'network-error';
+
+let refreshInFlight: Promise<RefreshOutcome> | null = null;
+
+async function refreshTokens(): Promise<RefreshOutcome> {
   const token = tokenStore.refresh;
-  if (!token) return false;
+  if (!token) return 'rejected';
 
   // Collapse concurrent 401s into a single refresh call; a second rotation
   // attempt with the same token would revoke the whole family server-side.
@@ -90,12 +144,12 @@ async function refreshTokens(): Promise<boolean> {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ refreshToken: token }),
         });
-        if (!res.ok) return false;
+        if (!res.ok) return 'rejected';
         const body = await res.json();
         tokenStore.set(body.data.accessToken, body.data.refreshToken, body.data.sessionId);
-        return true;
+        return 'ok';
       } catch {
-        return false;
+        return 'network-error';
       } finally {
         // Reset synchronously: concurrent callers already hold this promise,
         // and leaving a settled one cached would make the NEXT 401 reuse a
@@ -125,22 +179,33 @@ export async function request<T = unknown>(path: string, opts: RequestOptions = 
   const headers: Record<string, string> = {};
   const token = tokenStore.access;
   if (token) headers.Authorization = `Bearer ${token}`;
-  if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
+  // FormData sets its own multipart Content-Type (with boundary) — fetch does
+  // this automatically only when the header isn't already set, and only when
+  // it never got JSON.stringify'd, so FormData bodies pass through as-is.
+  const isFormData = opts.body instanceof FormData;
+  if (opts.body !== undefined && !isFormData) headers['Content-Type'] = 'application/json';
 
   let res: Response;
   try {
     res = await fetch(url.toString(), {
       method: opts.method ?? 'GET',
       headers,
-      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+      body: opts.body === undefined ? undefined : isFormData ? (opts.body as FormData) : JSON.stringify(opts.body),
     });
   } catch {
     throw new ApiError(0, 'NETWORK_ERROR', '网络连接失败，请检查网络后重试');
   }
 
   if (res.status === 401 && !opts.retrying && tokenStore.refresh) {
-    if (await refreshTokens()) {
+    const outcome = await refreshTokens();
+    if (outcome === 'ok') {
       return request<T>(path, { ...opts, retrying: true });
+    }
+    if (outcome === 'network-error') {
+      // Couldn't even reach the server to ask — this is not the server
+      // saying the session is over, so don't wipe tokens or bounce to
+      // /login; let the caller handle it as a plain connectivity failure.
+      throw new ApiError(0, 'NETWORK_ERROR', '网络连接失败，请检查网络后重试');
     }
     tokenStore.clear();
     onAuthFailure?.();
@@ -155,14 +220,14 @@ export async function request<T = unknown>(path: string, opts: RequestOptions = 
   }
 
   const text = await res.text();
-  const body = text ? JSON.parse(text) : {};
+  const body = parseJsonBody(text);
 
   if (!res.ok) {
     const err = body.error ?? {};
     throw new ApiError(
       res.status,
       err.code ?? 'INTERNAL_ERROR',
-      err.message ?? '请求失败',
+      err.message ?? describeNonJsonError(res.status),
       err.details,
     );
   }
@@ -193,42 +258,19 @@ export async function fetchAllPages<T>(
 
 /**
  * Upload a single file as multipart/form-data (Excel template imports).
- * Bypasses `request()`'s JSON body handling since fetch must set its own
- * multipart boundary in the Content-Type header.
+ * Goes through `request()` (FormData-aware) so a stale access token gets the
+ * same refresh-and-retry treatment as any other endpoint — an idle tab whose
+ * token expired mid-session would otherwise fail every import/upload with a
+ * hard 401 even though the refresh token is still good.
  */
-async function uploadFile<T = unknown>(
+function uploadFile<T = unknown>(
   path: string,
   file: File,
   query?: RequestOptions['query'],
 ): Promise<T> {
-  const url = new URL(`${BASE}${path}`, window.location.origin);
-  for (const [k, v] of Object.entries(query ?? {})) {
-    if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
-  }
-
   const form = new FormData();
   form.append('file', file);
-
-  const headers: Record<string, string> = {};
-  const token = tokenStore.access;
-  if (token) headers.Authorization = `Bearer ${token}`;
-
-  let res: Response;
-  try {
-    res = await fetch(url.toString(), { method: 'POST', headers, body: form });
-  } catch {
-    throw new ApiError(0, 'NETWORK_ERROR', '网络连接失败，请检查网络后重试');
-  }
-
-  const text = await res.text();
-  const body = text ? JSON.parse(text) : {};
-
-  if (!res.ok) {
-    const err = body.error ?? {};
-    throw new ApiError(res.status, err.code ?? 'INTERNAL_ERROR', err.message ?? '请求失败', err.details);
-  }
-
-  return body as T;
+  return request<T>(path, { method: 'POST', body: form, query });
 }
 
 export const api = {

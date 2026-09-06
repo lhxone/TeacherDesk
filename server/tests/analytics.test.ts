@@ -368,6 +368,28 @@ describe('analytics: class dimension', () => {
     expect(series[1].avg).toBe(90);
   });
 
+  it('keeps the most recent exams (not the oldest) when there are more than the default limit', async () => {
+    // Default limit is 20; create 22 so the two oldest must be dropped —
+    // taking asc-then-limit would instead drop the two NEWEST.
+    for (let i = 1; i <= 22; i++) {
+      const day = String(i).padStart(2, '0');
+      const exam = await createExam({ name: `第${i}次`, examDate: `2026-01-${day}` });
+      await putScores(exam, [{ studentId: studentIds[0], score: i }]);
+    }
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/analytics/class/${classId}/trend`,
+      headers: user.auth,
+    });
+
+    const series = res.json().data.series;
+    const names = series.map((s: { examName: string }) => s.examName);
+    // Oldest two (第1次, 第2次) dropped; the 20 most recent remain, still in
+    // ascending date order (3rd..22nd) for the chart.
+    expect(names).toEqual(Array.from({ length: 20 }, (_, i) => `第${i + 3}次`));
+  });
+
   it('filters the trend by subject, leaving other subjects off the series', async () => {
     const math = await createExam({ name: '数学月考', subject: '数学', examDate: '2026-09-01' });
     const chinese = await createExam({ name: '语文月考', subject: '语文', examDate: '2026-09-02' });
@@ -538,6 +560,32 @@ describe('analytics: student dimension', () => {
     const radar = res.json().data.subjectRadar;
     expect(radar.map((r: { subject: string }) => r.subject).sort()).toEqual(['数学', '物理']);
     expect(radar.find((r: { subject: string }) => r.subject === '数学').zScore).toBeGreaterThan(0);
+  });
+
+  it('radar reflects the latest exam even with more than the default limit of scores', async () => {
+    // Default limit is 20; sit 22 math exams for this student so the radar's
+    // "latest exam per subject" pick must come from an accurately-recent
+    // window, not from the 20 OLDEST exams (which asc-then-limit would keep).
+    for (let i = 1; i <= 22; i++) {
+      const day = String(i).padStart(2, '0');
+      const exam = await createExam({ name: `第${i}次`, subject: '数学', examDate: `2026-02-${day}` });
+      // Score climbs with i so the "latest" exam is unambiguously identifiable.
+      await putScores(exam, [{ studentId: studentIds[0], score: 50 + i }]);
+    }
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/analytics/student/${studentIds[0]}?subject=数学`,
+      headers: user.auth,
+    });
+
+    const data = res.json().data;
+    // The trend series itself must run through exam 22 (the true latest),
+    // not stop at exam 20 because the oldest two got kept instead.
+    expect(data.trend[data.trend.length - 1].score).toBe(50 + 22);
+
+    const mathRadar = data.subjectRadar.find((r: { subject: string }) => r.subject === '数学');
+    expect(mathRadar).toBeDefined();
   });
 
   it('lists distinct subjects and filters the trend to one subject', async () => {
