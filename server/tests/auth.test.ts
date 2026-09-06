@@ -366,6 +366,30 @@ describe('auth: token lifecycle', () => {
     expect(afterBreach.statusCode).toBe(401);
   });
 
+  it('only lets one of two concurrent requests consume the same refresh token', async () => {
+    const user = await registerUser(app);
+
+    // Fire both requests together so they race on the same stored token row
+    // instead of one completing before the other starts.
+    const [a, b] = await Promise.all([
+      app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/refresh',
+        payload: { refreshToken: user.refreshToken },
+      }),
+      app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/refresh',
+        payload: { refreshToken: user.refreshToken },
+      }),
+    ]);
+
+    const statuses = [a.statusCode, b.statusCode].sort();
+    // Exactly one request wins the race; the other must fail as a replay,
+    // never both succeeding with two distinct fresh token pairs.
+    expect(statuses).toEqual([200, 401]);
+  });
+
   it('rejects an expired refresh token', async () => {
     const user = await registerUser(app);
     await prisma.refreshToken.updateMany({

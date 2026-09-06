@@ -10,8 +10,27 @@ export async function createTestApp(): Promise<FastifyInstance> {
   return app;
 }
 
+/**
+ * Guard against ever running the destructive TRUNCATE below against a
+ * non-test database. `server/.env.test` (loaded by tests/setup.ts) must point
+ * at a database whose name ends in `_test`; if DATABASE_URL doesn't match
+ * that, refuse rather than risk wiping a real dev/prod database.
+ */
+function assertTestDatabase() {
+  const url = process.env.DATABASE_URL ?? '';
+  const dbName = url.split('?')[0].split('/').pop() ?? '';
+  if (!dbName.endsWith('_test')) {
+    throw new Error(
+      `Refusing to TRUNCATE: DATABASE_URL does not point at a *_test database ` +
+        `(got database "${dbName}"). Check that server/.env.test is present and ` +
+        `loaded — see tests/setup.ts.`,
+    );
+  }
+}
+
 /** Truncate every table between tests; RESTART IDENTITY keeps sequences clean. */
 export async function resetDb() {
+  assertTestDatabase();
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
       group_members, groups, grouping_plans,

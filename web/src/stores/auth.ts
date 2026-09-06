@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import { api, purgeApiCaches, tokenStore } from '@/api/client';
+import { api, ApiError, purgeApiCaches, tokenStore } from '@/api/client';
 import { disablePush, syncPushSubscription } from '@/api/push';
 import { useClassStore } from '@/stores/classes';
 import type { AuthResult, Envelope, User } from '@/api/types';
@@ -31,6 +31,7 @@ export const useAuthStore = defineStore('auth', () => {
 
     tokenStore.set(res.data.accessToken, res.data.refreshToken, res.data.sessionId);
     user.value = res.data.user;
+    tokenStore.saveUserSnapshot(res.data.user);
   }
 
   async function login(email: string, password: string, rememberMe = false) {
@@ -45,6 +46,7 @@ export const useAuthStore = defineStore('auth', () => {
 
     tokenStore.set(res.data.accessToken, res.data.refreshToken, res.data.sessionId);
     user.value = res.data.user;
+    tokenStore.saveUserSnapshot(res.data.user);
     void syncPushSubscription();
   }
 
@@ -77,17 +79,43 @@ export const useAuthStore = defineStore('auth', () => {
     await purgeApiCaches();
   }
 
-  /** Restore the session on boot; returns false when the stored token is dead. */
+  /**
+   * Restore the session on boot; returns false when the stored token is dead.
+   *
+   * A network failure (offline, tunnel down) is not the same thing as the
+   * server rejecting the token — treating both as "log out" used to mean
+   * starting the app with no network wiped tokens and the offline API cache
+   * on every boot, defeating the app's offline-readable mode entirely. Only
+   * an explicit auth rejection (401/403 from the server) clears the session;
+   * anything else falls back to the last known user snapshot, keeping the
+   * existing token so a real request succeeds again once the network is back.
+   */
   async function loadSession(): Promise<boolean> {
     if (!tokenStore.access) return false;
     loading.value = true;
     try {
       const res = await api.get<Envelope<User>>('/auth/me');
       user.value = res.data;
+      tokenStore.saveUserSnapshot(res.data);
       void syncPushSubscription();
       return true;
-    } catch {
-      await clearLocalIdentity();
+    } catch (e) {
+      const isAuthRejection = e instanceof ApiError && (e.status === 401 || e.status === 403);
+      if (isAuthRejection) {
+        await clearLocalIdentity();
+        return false;
+      }
+
+      // Network error (fetch threw, or a proxy/tunnel returned a non-JSON
+      // 5xx): keep the session alive from the last snapshot instead of
+      // logging the user out for something that isn't their credentials.
+      const snapshot = tokenStore.readUserSnapshot<User>();
+      if (snapshot) {
+        user.value = snapshot;
+        return true;
+      }
+      // No snapshot to fall back to (first launch, or storage was cleared) —
+      // there's nothing to show as "logged in", so this boot can't proceed.
       return false;
     } finally {
       loading.value = false;

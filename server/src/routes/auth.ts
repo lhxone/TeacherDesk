@@ -192,10 +192,24 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       throw ApiError.unauthenticated('刷新令牌已过期，请重新登录');
     }
 
-    await prisma.refreshToken.update({
-      where: { id: stored.id },
+    // Consume the token atomically: the WHERE clause requires revokedAt to
+    // still be null at the moment of the UPDATE, so if two requests race here
+    // only one can flip it (updateMany reports how many rows it touched).
+    // Without this, two concurrent requests could both read revokedAt: null
+    // above and both go on to mint a fresh token from the same refresh token.
+    const consumed = await prisma.refreshToken.updateMany({
+      where: { id: stored.id, revokedAt: null },
       data: { revokedAt: new Date() },
     });
+    if (consumed.count === 0) {
+      // Lost the race — another request already consumed this token. Treat
+      // it the same as an already-rotated token: revoke the whole family.
+      await prisma.refreshToken.updateMany({
+        where: { userId: stored.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      throw ApiError.unauthenticated('刷新令牌已失效，请重新登录');
+    }
 
     const remainingMs = stored.expiresAt.getTime() - Date.now();
     const rememberMe = remainingMs > config.refreshTokenTtlDays * 24 * 60 * 60 * 1000;

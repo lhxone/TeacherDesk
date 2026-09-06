@@ -155,6 +155,39 @@ describe('auth store: cross-account data isolation', () => {
     expect(deleted).toContain('td-data');
   });
 
+  it('a network failure during session restore keeps the session alive from the last snapshot', async () => {
+    const deleted = stubCaches(['td-data']);
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+
+    const auth = useAuthStore();
+    tokenStore.set('access-1', 'refresh-1');
+    tokenStore.saveUserSnapshot(AUTH_PAYLOAD.data.user);
+
+    const ok = await auth.loadSession();
+
+    // Offline must not look like "logged out": token, cache and user survive.
+    expect(ok).toBe(true);
+    expect(tokenStore.access).toBe('access-1');
+    expect(auth.user?.email).toBe('teacher@example.com');
+    expect(deleted).not.toContain('td-data');
+  });
+
+  it('a network failure during session restore with no snapshot cannot restore', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+
+    const auth = useAuthStore();
+    tokenStore.set('access-1', 'refresh-1');
+    // No prior saveUserSnapshot() call — first-ever offline launch.
+
+    const ok = await auth.loadSession();
+
+    expect(ok).toBe(false);
+    // Still not treated as a hard auth failure: the token is left alone so a
+    // real request succeeds again once the network comes back.
+    expect(tokenStore.access).toBe('access-1');
+    expect(auth.user).toBeNull();
+  });
+
   it('changing the password clears the local session and caches', async () => {
     const deleted = stubCaches(['td-data']);
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 204 } as Response));
