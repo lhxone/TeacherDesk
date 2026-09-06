@@ -600,7 +600,7 @@ async function logout() {
         <button class="btn btn-danger btn-block" @click="logout">退出登录</button>
       </section>
 
-      <p class="build-version">版本 {{ appCommit }}</p>
+      <p class="build-version"><RouterLink to="/about">关于教师工作台</RouterLink> · 版本 {{ appCommit }}</p>
     </div>
   </div>
 </template>

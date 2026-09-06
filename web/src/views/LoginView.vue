@@ -70,6 +70,7 @@ async function submit() {
         还没有账号？
         <RouterLink :to="{ name: 'register' }">立即注册</RouterLink>
       </p>
+      <RouterLink class="switch hint" to="/about">了解教师工作台 →</RouterLink>
     </form>
   </div>
 </template>

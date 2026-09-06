@@ -3,6 +3,7 @@ import { useAuthStore } from '@/stores/auth';
 import { tokenStore } from '@/api/client';
 
 const routes = [
+  { path: '/about', name: 'about', component: () => import('@/views/AboutView.vue'), meta: { public: true } },
   { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue'), meta: { public: true } },
   { path: '/register', name: 'register', component: () => import('@/views/RegisterView.vue'), meta: { public: true } },
   { path: '/', name: 'home', component: () => import('@/views/HomeView.vue') },
@@ -36,7 +37,7 @@ router.beforeEach(async (to) => {
   }
 
   if (to.meta.public) {
-    return auth.isAuthenticated && to.name !== 'not-found' ? { name: 'home' } : true;
+    return auth.isAuthenticated && (to.name === 'login' || to.name === 'register') ? { name: 'home' } : true;
   }
 
   if (!auth.isAuthenticated) {
