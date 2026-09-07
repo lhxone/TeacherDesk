@@ -90,6 +90,15 @@ body {
   padding: 0;
 }
 
+/* Reserve the scrollbar's width even when a page's content is too short to
+   need one. Without this, navigating to a shorter page (e.g. entering an
+   empty folder in the Knowledge Center) removes the scrollbar, the viewport
+   gains back its width, and any horizontally-centered layout (.page) visibly
+   shifts sideways — the "page jitter" this fixes. */
+html {
+  scrollbar-gutter: stable;
+}
+
 body {
   background: var(--bg);
   color: var(--text);
