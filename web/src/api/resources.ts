@@ -7,6 +7,7 @@ import type {
   ResourceCollection,
   ResourceStatus,
   ResourceType,
+  Tag,
 } from '@/api/types';
 
 export type ResourceListQuery = {
@@ -134,4 +135,19 @@ export const resourceCollectionsApi = {
   update: (id: string, payload: Partial<{ name: string; parentId: string | null }>) =>
     api.patch<Envelope<ResourceCollection>>(`/resource-collections/${id}`, payload),
   remove: (id: string) => api.del(`/resource-collections/${id}`),
+};
+
+// Resource tags (知识中心) — a namespace separate from student tags (see the
+// Tag model's `scope` column comment in schema.prisma) despite sharing one
+// table; every call here is pinned to scope=resource so it can never read,
+// create, or collide with a student tag of the same name. This is the one
+// place with a create/rename/recolor/delete UI (TagManager.vue) — everywhere
+// else just picks from the list.
+export const tagsApi = {
+  list: () => api.get<Envelope<Tag[]>>('/tags', { scope: 'resource' }),
+  create: (payload: { name: string; color?: string }) =>
+    api.post<Envelope<Tag>>('/tags', { ...payload, scope: 'resource' }),
+  update: (id: string, payload: Partial<{ name: string; color: string }>) =>
+    api.patch<Envelope<Tag>>(`/tags/${id}`, payload),
+  remove: (id: string) => api.del(`/tags/${id}`),
 };

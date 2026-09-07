@@ -4,19 +4,25 @@
  * folder tree (ResourceCollectionTree), and the main pane shows the current
  * folder's contents — subfolders and files mixed in one grid/list, exactly
  * like Windows Explorer's right pane. Double-click a folder to enter it,
- * double-click a file to open its detail/preview. Type/favorite/recent/
- * knowledge-point/tag browsing all live as filters on top of "current
- * folder" rather than as separate top-level sections — see `filterMode`.
+ * double-click a file to open its detail/preview. Type/favorite/recent/tag
+ * browsing all live as filters on top of "current folder" rather than as
+ * separate top-level sections — see `filterMode`.
+ *
+ * Knowledge points (KnowledgeNode) used to have their own browse/manage pane
+ * here too, overlapping with tags (both were "attach a label to a resource,
+ * browse by it") — removed in favor of tags only. The backend model/API/data
+ * are untouched (other features may still reference it); this view just no
+ * longer surfaces it.
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { api } from '@/api/client';
-import { knowledgeNodesApi, resourceCollectionsApi, resourcesApi } from '@/api/resources';
-import type { Envelope, KnowledgeNode, Resource, ResourceCollection, ResourceType, Tag } from '@/api/types';
+import { resourceCollectionsApi, resourcesApi, tagsApi } from '@/api/resources';
+import type { Resource, ResourceCollection, ResourceType, Tag } from '@/api/types';
 import { RESOURCE_STATUS_LABELS, RESOURCE_TYPE_LABELS } from '@/api/types';
 import ModalDialog from '@/components/ModalDialog.vue';
 import EmptyState from '@/components/EmptyState.vue';
 import UploadDialog from '@/components/UploadDialog.vue';
-import KnowledgeTreeManager from '@/components/KnowledgeTreeManager.vue';
+import TagManager from '@/components/TagManager.vue';
 import ResourceCollectionTree from '@/components/ResourceCollectionTree.vue';
 import CollectionPicker from '@/components/CollectionPicker.vue';
 import GgbApplet from '@/components/GgbApplet.vue';
@@ -39,15 +45,14 @@ const FILTER_OPTIONS: { key: FilterMode; label: string }[] = [
 ];
 
 // The current folder being browsed (null = root / 全部文件夹). Independent of
-// filters: switching a type/tag/knowledge-point filter narrows the listing
-// within this folder, it never navigates away from it.
+// filters: switching a type/tag filter narrows the listing within this
+// folder, it never navigates away from it.
 const activeCollectionId = ref<string | null>(null);
 const filterMode = ref<FilterMode>('none');
 const activeTagId = ref<string | null>(null);
-const activeKnowledgeNodeId = ref<string | null>(null);
-// 'browse' = normal Explorer view; 'knowledge'/'tags' swap the main pane for
-// their management UI (same as before), independent of the folder tree.
-const mainPane = ref<'browse' | 'knowledge' | 'tags'>('browse');
+// 'browse' = normal Explorer view; 'tags' swaps the main pane for the tag
+// management UI, independent of the folder tree.
+const mainPane = ref<'browse' | 'tags'>('browse');
 
 // Mobile only: the full folder tree (ResourceCollectionTree) collapses into
 // this bottom sheet instead of taking a permanent chunk of vertical space —
@@ -64,7 +69,6 @@ const viewMode = ref<ViewMode>((localStorage.getItem('kc-view-mode') as ViewMode
 watch(viewMode, (v) => localStorage.setItem('kc-view-mode', v));
 
 const tags = ref<Tag[]>([]);
-const knowledgeNodes = ref<KnowledgeNode[]>([]);
 const collections = ref<ResourceCollection[]>([]);
 
 const collectionsById = computed(() => new Map(collections.value.map((c) => [c.id, c])));
@@ -79,18 +83,15 @@ const byParentId = computed(() => {
   return map;
 });
 
-// Favorite/tag/knowledge-point browsing searches the whole tree regardless
-// of which folder is "open" (same as the search box) — so unlike plain
-// folder browsing, it must not also imply "and show this folder's
-// subfolders", which would visually claim a scope the file listing doesn't
-// actually honor. Root-folder browsing itself doesn't hit this: it's not a
-// global-scope view, it's "the root folder", which does have real
-// subfolders to show.
-const isGlobalFilterView = computed(
-  () => filterMode.value === 'favorite' || !!activeTagId.value || !!activeKnowledgeNodeId.value,
-);
+// Favorite/tag browsing searches the whole tree regardless of which folder
+// is "open" (same as the search box) — so unlike plain folder browsing, it
+// must not also imply "and show this folder's subfolders", which would
+// visually claim a scope the file listing doesn't actually honor.
+// Root-folder browsing itself doesn't hit this: it's not a global-scope
+// view, it's "the root folder", which does have real subfolders to show.
+const isGlobalFilterView = computed(() => filterMode.value === 'favorite' || !!activeTagId.value);
 
-/** Subfolders of the folder currently open, shown alongside its files — hidden during a global-scope view (search, favorites, tag/knowledge-point filters) since those aren't scoped to "this folder" at all. */
+/** Subfolders of the folder currently open, shown alongside its files — hidden during a global-scope view (search, favorites, tag filters) since those aren't scoped to "this folder" at all. */
 const childFolders = computed(() =>
   searchTerm.value.trim() || isGlobalFilterView.value ? [] : byParentId.value.get(activeCollectionId.value) ?? [],
 );
@@ -274,9 +275,9 @@ async function loadResources() {
       // Explorer's search box searches the whole tree, not just one folder.
       query.q = searchTerm.value.trim();
     } else if (isGlobalFilterView.value) {
-      // Favorites/tags/knowledge-points: whole tree, same as search — leave
-      // collectionId unset entirely (matches every resource regardless of
-      // which folder, or no folder, it's filed into).
+      // Favorites/tags: whole tree, same as search — leave collectionId
+      // unset entirely (matches every resource regardless of which folder,
+      // or no folder, it's filed into).
     } else if (activeCollectionId.value) {
       query.collectionId = activeCollectionId.value;
     } else {
@@ -290,7 +291,6 @@ async function loadResources() {
     if (filterMode.value === 'favorite') query.favorite = true;
     else if (filterMode.value !== 'none') query.type = filterMode.value;
     if (activeTagId.value) query.tagId = activeTagId.value;
-    if (activeKnowledgeNodeId.value) query.knowledgeNodeId = activeKnowledgeNodeId.value;
 
     const res = await resourcesApi.list(query);
     if (requestId !== resourcesRequestId) return; // a newer navigation already superseded this one
@@ -301,13 +301,8 @@ async function loadResources() {
 }
 
 async function loadTags() {
-  const res = await api.get<Envelope<Tag[]>>('/tags');
+  const res = await tagsApi.list();
   tags.value = res.data;
-}
-
-async function loadKnowledgeNodes() {
-  const res = await knowledgeNodesApi.list();
-  knowledgeNodes.value = res.data;
 }
 
 async function loadCollections() {
@@ -326,20 +321,11 @@ function openCollection(collectionId: string | null) {
 function selectTag(tagId: string) {
   mainPane.value = 'browse';
   activeTagId.value = tagId;
-  activeKnowledgeNodeId.value = null;
   loadResources();
 }
 
-function selectKnowledgeNode(nodeId: string) {
-  mainPane.value = 'browse';
-  activeKnowledgeNodeId.value = nodeId;
+function clearTagFilter() {
   activeTagId.value = null;
-  loadResources();
-}
-
-function clearTagAndKnowledgeFilters() {
-  activeTagId.value = null;
-  activeKnowledgeNodeId.value = null;
   loadResources();
 }
 
@@ -404,7 +390,6 @@ function formatDate(iso: string): string {
 onMounted(() => {
   loadResources();
   loadTags();
-  loadKnowledgeNodes();
   loadCollections();
 });
 </script>
@@ -427,15 +412,14 @@ onMounted(() => {
       <div class="kc-nav-mobile">
         <button
           class="nav-pill"
-          :class="{ active: mainPane === 'browse' && !activeTagId && !activeKnowledgeNodeId && filterMode !== 'favorite' }"
+          :class="{ active: mainPane === 'browse' && !activeTagId && filterMode !== 'favorite' }"
           @click="showMobileFolderSheet = true"
         >📁 {{ currentFolderShortLabel }}</button>
-        <button class="nav-pill" :class="{ active: mainPane === 'knowledge' }" @click="mainPane = 'knowledge'">🎯 知识点</button>
         <button class="nav-pill" :class="{ active: mainPane === 'tags' }" @click="mainPane = 'tags'">🏷️ 标签</button>
         <button
           class="nav-pill"
           :class="{ active: mainPane === 'browse' && filterMode === 'favorite' && !activeCollectionId }"
-          @click="mainPane = 'browse'; activeCollectionId = null; filterMode = 'favorite'; clearTagAndKnowledgeFilters()"
+          @click="mainPane = 'browse'; activeCollectionId = null; filterMode = 'favorite'; clearTagFilter()"
         >⭐ 收藏</button>
       </div>
       <!-- Fade hint that the strip scrolls further — without it a pill cut
@@ -458,7 +442,7 @@ onMounted(() => {
       <div class="folder-sheet-body">
         <ResourceCollectionTree
           :collections="collections"
-          :active-id="mainPane === 'browse' && !activeTagId && !activeKnowledgeNodeId ? activeCollectionId : null"
+          :active-id="mainPane === 'browse' && !activeTagId ? activeCollectionId : null"
           @changed="loadCollections"
           @select="(id) => { openCollection(id); showMobileFolderSheet = false; }"
         />
@@ -469,40 +453,23 @@ onMounted(() => {
       <aside class="kc-nav hide-mobile">
         <ResourceCollectionTree
           :collections="collections"
-          :active-id="mainPane === 'browse' && !activeTagId && !activeKnowledgeNodeId ? activeCollectionId : null"
+          :active-id="mainPane === 'browse' && !activeTagId ? activeCollectionId : null"
           @changed="loadCollections"
           @select="openCollection"
         />
         <div class="kc-nav-divider"></div>
-        <button class="kc-nav-item" :class="{ active: mainPane === 'knowledge' }" @click="mainPane = 'knowledge'">🎯 知识点</button>
         <button class="kc-nav-item" :class="{ active: mainPane === 'tags' }" @click="mainPane = 'tags'">🏷️ 标签</button>
         <button
           class="kc-nav-item"
           :class="{ active: mainPane === 'browse' && filterMode === 'favorite' && !activeCollectionId }"
-          @click="mainPane = 'browse'; activeCollectionId = null; filterMode = 'favorite'; clearTagAndKnowledgeFilters()"
+          @click="mainPane = 'browse'; activeCollectionId = null; filterMode = 'favorite'; clearTagFilter()"
         >⭐ 收藏</button>
       </aside>
 
       <main class="kc-content">
-        <!-- 知识点 tree -->
-        <div v-if="mainPane === 'knowledge'" class="stack">
-          <KnowledgeTreeManager :nodes="knowledgeNodes" @changed="loadKnowledgeNodes" @select="selectKnowledgeNode" />
-        </div>
-
-        <!-- 标签 list -->
-        <div v-else-if="mainPane === 'tags'" class="stack">
-          <div v-if="!tags.length" class="empty-inline">还没有标签，先在资源详情里添加</div>
-          <div v-else class="row">
-            <button
-              v-for="t in tags"
-              :key="t.id"
-              class="badge tag-pill"
-              :style="{ background: t.color + '22', color: t.color }"
-              @click="selectTag(t.id)"
-            >
-              {{ t.name }}
-            </button>
-          </div>
+        <!-- 标签管理：新建/重命名/改色/删除，点击标签名进入该标签的资源列表 -->
+        <div v-if="mainPane === 'tags'" class="stack">
+          <TagManager :tags="tags" @changed="loadTags" @select="selectTag" />
         </div>
 
         <!-- Explorer-style browse: breadcrumb + filters, folders and files mixed -->
@@ -522,9 +489,9 @@ onMounted(() => {
             <select v-model="filterMode" class="select" style="width: 140px">
               <option v-for="f in FILTER_OPTIONS" :key="f.key" :value="f.key">{{ f.label }}</option>
             </select>
-            <span v-if="activeTagId || activeKnowledgeNodeId" class="badge active-filter-badge">
-              {{ activeTagId ? '按标签筛选' : '按知识点筛选' }}
-              <button class="clear-filter" @click="clearTagAndKnowledgeFilters">✕</button>
+            <span v-if="activeTagId" class="badge active-filter-badge">
+              按标签筛选
+              <button class="clear-filter" @click="clearTagFilter">✕</button>
             </span>
             <div class="view-toggle" style="margin-left: auto">
               <button class="btn btn-sm" :class="{ active: viewMode === 'grid' }" title="平铺视图" @click="viewMode = 'grid'">▦</button>
@@ -680,7 +647,6 @@ onMounted(() => {
     <UploadDialog
       v-if="showUpload"
       :tags="tags"
-      :knowledge-nodes="knowledgeNodes"
       :target-collection-id="activeCollectionId"
       :target-collection-label="currentFolderLabel"
       @close="showUpload = false"

@@ -2,13 +2,12 @@
 import { ref } from 'vue';
 import { ApiError } from '@/api/client';
 import { resourcesApi } from '@/api/resources';
-import type { KnowledgeNode, ResourceType, Tag } from '@/api/types';
+import type { ResourceType, Tag } from '@/api/types';
 import { RESOURCE_TYPE_LABELS } from '@/api/types';
 import ModalDialog from '@/components/ModalDialog.vue';
 
 const props = defineProps<{
   tags: Tag[];
-  knowledgeNodes: KnowledgeNode[];
   /** The folder currently open in the explorer — the upload always lands here, Explorer-style. */
   targetCollectionId: string | null;
   /** Display path for the target folder, e.g. "文件夹 / 高二数学", for the "上传到" line. */
@@ -22,7 +21,6 @@ const type = ref<ResourceType | ''>('');
 const subject = ref('');
 const grade = ref('');
 const selectedTagIds = ref<string[]>([]);
-const selectedKnowledgeNodeIds = ref<string[]>([]);
 const uploading = ref(false);
 const error = ref('');
 
@@ -55,12 +53,6 @@ function toggleTag(id: string) {
     : [...selectedTagIds.value, id];
 }
 
-function toggleKnowledgeNode(id: string) {
-  selectedKnowledgeNodeIds.value = selectedKnowledgeNodeIds.value.includes(id)
-    ? selectedKnowledgeNodeIds.value.filter((x) => x !== id)
-    : [...selectedKnowledgeNodeIds.value, id];
-}
-
 async function submit() {
   if (!file.value) {
     error.value = '请选择要上传的文件';
@@ -76,7 +68,6 @@ async function submit() {
       grade: grade.value.trim() || undefined,
       collectionId: props.targetCollectionId ?? undefined,
       tagIds: selectedTagIds.value,
-      knowledgeNodeIds: selectedKnowledgeNodeIds.value,
     });
     emit('uploaded');
   } catch (e) {
@@ -133,22 +124,6 @@ async function submit() {
             @click="toggleTag(t.id)"
           >
             {{ t.name }}
-          </button>
-        </div>
-      </div>
-
-      <div v-if="knowledgeNodes.length" class="field">
-        <label>知识点</label>
-        <div class="row">
-          <button
-            v-for="n in knowledgeNodes"
-            :key="n.id"
-            type="button"
-            class="badge tag-toggle"
-            :class="{ picked: selectedKnowledgeNodeIds.includes(n.id) }"
-            @click="toggleKnowledgeNode(n.id)"
-          >
-            {{ n.name }}
           </button>
         </div>
       </div>

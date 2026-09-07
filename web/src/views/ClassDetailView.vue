@@ -98,7 +98,10 @@ function toggleSession(id: string) {
 }
 
 async function loadTags() {
-  const res = await api.get<Envelope<Tag[]>>('/tags');
+  // Student tags (scope=student) — a namespace separate from Knowledge
+  // Center's resource tags despite sharing the tags table; see the Tag
+  // model's `scope` column comment in schema.prisma.
+  const res = await api.get<Envelope<Tag[]>>('/tags', { scope: 'student' });
   tags.value = res.data;
 }
 
@@ -136,7 +139,7 @@ async function createTag() {
   if (!name) return;
   creatingTag.value = true;
   try {
-    const res = await api.post<Envelope<Tag>>('/tags', { name });
+    const res = await api.post<Envelope<Tag>>('/tags', { name, scope: 'student' });
     tags.value.push(res.data);
     studentForm.value.tagIds.push(res.data.id);
     newTagName.value = '';

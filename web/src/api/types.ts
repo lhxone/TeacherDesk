@@ -57,7 +57,7 @@ export type ClassItem = {
   createdAt: string;
 };
 
-export type Tag = { id: string; name: string; color: string; studentCount?: number };
+export type Tag = { id: string; name: string; color: string; studentCount?: number; resourceCount?: number };
 
 export type Student = {
   id: string;

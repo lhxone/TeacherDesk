@@ -146,7 +146,7 @@ export async function registerStudentRoutes(app: FastifyInstance) {
     if (body.studentNo) await assertStudentNoFree(classId, body.studentNo);
 
     if (body.tagIds?.length) {
-      const owned = await prisma.tag.count({ where: { id: { in: body.tagIds }, userId } });
+      const owned = await prisma.tag.count({ where: { id: { in: body.tagIds }, userId, scope: 'student' } });
       if (owned !== body.tagIds.length) throw ApiError.forbidden('包含无权使用的标签');
     }
 
@@ -335,7 +335,7 @@ export async function registerStudentRoutes(app: FastifyInstance) {
     switch (body.action) {
       case 'addTags': {
         const tagIds = z.array(z.string().uuid()).parse(body.payload?.tagIds ?? []);
-        const ownedTags = await prisma.tag.count({ where: { id: { in: tagIds }, userId } });
+        const ownedTags = await prisma.tag.count({ where: { id: { in: tagIds }, userId, scope: 'student' } });
         if (ownedTags !== tagIds.length) throw ApiError.forbidden('包含无权使用的标签');
 
         const result = await prisma.studentTag.createMany({
@@ -434,7 +434,7 @@ export async function registerStudentRoutes(app: FastifyInstance) {
     }
 
     if (body.tagIds) {
-      const ownedTags = await prisma.tag.count({ where: { id: { in: body.tagIds }, userId } });
+      const ownedTags = await prisma.tag.count({ where: { id: { in: body.tagIds }, userId, scope: 'student' } });
       if (ownedTags !== body.tagIds.length) throw ApiError.forbidden('包含无权使用的标签');
 
       await prisma.$transaction([
