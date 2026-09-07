@@ -12,7 +12,7 @@
  */
 import { precacheAndRoute, cleanupOutdatedCaches } from 'workbox-precaching';
 import { registerRoute } from 'workbox-routing';
-import { NetworkFirst, NetworkOnly } from 'workbox-strategies';
+import { CacheFirst, NetworkFirst, NetworkOnly } from 'workbox-strategies';
 import { ExpirationPlugin } from 'workbox-expiration';
 import { CacheableResponsePlugin } from 'workbox-cacheable-response';
 
@@ -55,6 +55,26 @@ registerRoute(
 
 // Analytics is derived data, cheap to refetch and of little use offline.
 registerRoute(/\/api\/v1\/analytics\//, new NetworkOnly());
+
+// GeoGebra 课堂工具 (see GgbApplet.vue): deployggb.js and the ~80MB web3d
+// codebase it loads are fetched straight from geogebra.org's own CDN — we
+// don't (and, short of mirroring GeoGebra's entire release, can't easily)
+// self-host them. CacheFirst means the first 展示/编辑 open on a device pays
+// that download once; every open after that (same device, any class, any
+// file) is served from the SW cache with no network round-trip at all — the
+// files are content-hashed/versioned by GeoGebra so a cached copy never goes
+// stale. `crossorigin` request mode needs an explicit opaque-response allow,
+// since geogebra.org doesn't send us CORS headers.
+registerRoute(
+  ({ url }) => url.origin === 'https://www.geogebra.org',
+  new CacheFirst({
+    cacheName: 'geogebra-cdn',
+    plugins: [
+      new CacheableResponsePlugin({ statuses: [0, 200] }),
+      new ExpirationPlugin({ maxEntries: 60, maxAgeSeconds: 60 * 60 * 24 * 180 }),
+    ],
+  }),
+);
 
 // --- Web Push ---
 

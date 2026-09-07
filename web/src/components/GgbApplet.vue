@@ -23,6 +23,7 @@ interface GgbAppletInstance {
   getBase64(callback: (base64: string) => void): void;
   getBase64(): string;
   getPNGBase64(exportScale: number, transparent: boolean, dpi: number): string;
+  setPerspective(perspective: string): void;
   remove?(): void;
 }
 
@@ -129,6 +130,30 @@ async function mountApplet() {
         clearTimeout(loadTimeoutId);
         loadTimeoutId = null;
       }
+      // Read-only 展示 mode is switched to the graphics-only perspective here,
+      // at runtime, rather than passed as a `perspective` construction param
+      // above — GeoGebra's own docs say that param "shouldn't be used with
+      // ggbBase64" and it is in fact silently ignored whenever a file is
+      // loaded (checked against the live applet, not just docs). Without
+      // this, 'geometry' defaults to graphics + algebra list side by side,
+      // and on a narrow (mobile) viewport GeoGebra collapses that into an
+      // opaque panel overlapping the bottom half of the canvas instead of
+      // sitting beside it, hiding the construction behind a wall of
+      // "f: y = 3x" text. showAlgebraInput above only controls whether new
+      // formulas can be typed in, not whether the existing list renders.
+      // Edit mode keeps the default (graphics + algebra) since a teacher
+      // editing live needs to see/change the formulas.
+      // setPerspective() called synchronously here is a no-op — GeoGebra's
+      // internal view/DOM state isn't settled yet at the exact moment
+      // appletOnLoad fires (confirmed against the live applet: the same call
+      // works when run a tick later from the console, but even a 2s
+      // setTimeout from here does not reproduce that success — still
+      // unresolved, tracked as a known issue for narrow/mobile viewports;
+      // see the GgbApplet mobile-layout notes). Left in at a generous delay
+      // since it does no harm and may yet catch some browsers/timings.
+      if (!props.editable) {
+        setTimeout(() => applet?.setPerspective('G'), 2000);
+      }
       loading.value = false;
       emit('ready');
       observeResize();
@@ -138,9 +163,11 @@ async function mountApplet() {
   // download URL — see the top-of-file comment for why.
   if (props.base64) {
     params.ggbBase64 = props.base64;
-  } else {
-    // Graphics-only perspective for a blank canvas; also part of the
-    // LoadFileFailed workaround above (no construction to load at all).
+  } else if (!props.editable) {
+    // No file to load: the construction-param form of `perspective` is fine
+    // here (that's the one case GeoGebra's docs say it's meant for), and
+    // also happens to be part of the LoadFileFailed workaround elsewhere in
+    // this file (no construction to load at all).
     params.perspective = 'G';
   }
 
@@ -252,7 +279,13 @@ defineExpose({
 
 <template>
   <div class="ggb-wrap" :style="{ height: height ?? '520px' }">
-    <div v-if="loading" class="ggb-status hint">GeoGebra 加载中…</div>
+    <div v-if="loading" class="ggb-status hint">
+      <p>GeoGebra 加载中…</p>
+      <p class="ggb-status-sub">
+        首次加载需要从 GeoGebra 官方下载画板资源，视网络情况可能需要几十秒；
+        加载完成后会被浏览器缓存，之后再打开会快很多
+      </p>
+    </div>
     <p v-else-if="error" class="ggb-status error-text">{{ error }}</p>
     <!--
       Always rendered, never v-show/v-if hidden: mountApplet() measures this
@@ -281,8 +314,18 @@ defineExpose({
   position: absolute;
   inset: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  text-align: center;
+  gap: 6px;
+  padding: 0 24px;
+}
+
+.ggb-status-sub {
+  font-size: 12px;
+  color: var(--text-faint);
+  max-width: 360px;
 }
 
 .ggb-canvas { width: 100%; height: 100%; }
