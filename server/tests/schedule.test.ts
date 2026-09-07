@@ -14,6 +14,7 @@ import {
   lessonPeriodTimes,
   normalizeDaySchedule,
 } from '../src/lib/daySchedule.js';
+import { startOfLocalDay } from '../src/lib/timezone.js';
 
 const d = (s: string) => new Date(`${s}T00:00:00.000Z`);
 
@@ -97,17 +98,30 @@ describe('schedule: recurring events', () => {
   };
 
   it('occurs on every matching weekday from its start date onward', () => {
-    expect(recurringEventOccursOn(duty, d('2026-09-09'))).toBe(true); // next Wed
-    expect(recurringEventOccursOn(duty, d('2026-09-16'))).toBe(true);
-    expect(recurringEventOccursOn(duty, d('2026-09-10'))).toBe(false); // Thursday
+    expect(recurringEventOccursOn(duty, d('2026-09-09'), duty.startAt)).toBe(true); // next Wed
+    expect(recurringEventOccursOn(duty, d('2026-09-16'), duty.startAt)).toBe(true);
+    expect(recurringEventOccursOn(duty, d('2026-09-10'), duty.startAt)).toBe(false); // Thursday
   });
 
   it('does not occur before its own start date', () => {
-    expect(recurringEventOccursOn(duty, d('2026-08-26'))).toBe(false); // a Wednesday, but earlier
+    expect(recurringEventOccursOn(duty, d('2026-08-26'), duty.startAt)).toBe(false); // a Wednesday, but earlier
   });
 
   it('a non-recurring event never "occurs" via this check', () => {
-    expect(recurringEventOccursOn({ ...duty, repeatWeekday: null }, d('2026-09-09'))).toBe(false);
+    expect(recurringEventOccursOn({ ...duty, repeatWeekday: null }, d('2026-09-09'), duty.startAt)).toBe(false);
+  });
+
+  it('uses the local-day startDay, not startAt directly: a UTC+8 all-day todo created 2026-09-09 local time is stored as 2026-09-08T16:00:00Z, but must be treated as starting 09-09', () => {
+    const localMidnightStoredAsUtc = {
+      startAt: new Date('2026-09-08T16:00:00.000Z'), // 2026-09-09 00:00 UTC+8
+      endAt: null,
+      repeatWeekday: 3, // Wednesday
+    };
+    const localStartDay = d('2026-09-09'); // the teacher's actual local start date
+    // Without the local-day correction, toUtcDate(startAt) would read 09-08
+    // (a Tuesday) and this event would appear to have started a day early —
+    // this is the exact bug this test guards against.
+    expect(recurringEventOccursOn(localMidnightStoredAsUtc, d('2026-09-09'), localStartDay)).toBe(true);
   });
 
   it('projects the original time-of-day onto a later matching date', () => {
@@ -123,6 +137,41 @@ describe('schedule: recurring events', () => {
   it('projects a null endAt as null', () => {
     const projected = projectRecurringEvent({ ...duty, endAt: null }, d('2026-09-16'));
     expect(projected.endAt).toBeNull();
+  });
+});
+
+describe('timezone: startOfLocalDay', () => {
+  // Regression coverage for the bug this fixes: an all-day todo the teacher
+  // picks for 09-09 is stored (EventDialog.vue) as that date's *local*
+  // midnight, which for any positive UTC offset lands on the previous UTC
+  // calendar day — e.g. 2026-09-09 00:00 in UTC+8 serializes to
+  // 2026-09-08T16:00:00Z. Reading the UTC date component directly (as the
+  // week-agenda route used to) then places the todo under 09-08 instead.
+  it('a UTC+8 local-midnight instant resolves to the intended local date, not the earlier UTC date', () => {
+    const storedUtc = new Date('2026-09-08T16:00:00.000Z'); // 2026-09-09 00:00 UTC+8
+    expect(formatDate(startOfLocalDay(storedUtc, null, 480))).toBe('2026-09-09');
+  });
+
+  it('same instant, with an explicit IANA zone instead of the numeric fallback offset', () => {
+    const storedUtc = new Date('2026-09-08T16:00:00.000Z');
+    expect(formatDate(startOfLocalDay(storedUtc, 'Asia/Shanghai', 480))).toBe('2026-09-09');
+  });
+
+  it('a negative-offset zone can push the local date a day *later* than the UTC date', () => {
+    const storedUtc = new Date('2026-09-09T23:00:00.000Z');
+    // -300 minutes = UTC-5 (e.g. US Eastern, standard time): local time is
+    // still 2026-09-09 18:00, not yet the next day.
+    expect(formatDate(startOfLocalDay(storedUtc, null, -300))).toBe('2026-09-09');
+  });
+
+  it('a UTC (zero-offset) instant needs no correction', () => {
+    const storedUtc = new Date('2026-09-09T08:00:00.000Z');
+    expect(formatDate(startOfLocalDay(storedUtc, null, 0))).toBe('2026-09-09');
+  });
+
+  it('an invalid IANA zone name falls back to the numeric offset instead of throwing', () => {
+    const storedUtc = new Date('2026-09-08T16:00:00.000Z');
+    expect(formatDate(startOfLocalDay(storedUtc, 'not/a/real/zone', 480))).toBe('2026-09-09');
   });
 });
 

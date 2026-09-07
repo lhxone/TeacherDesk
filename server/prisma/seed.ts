@@ -9,7 +9,7 @@ import { generateInviteCode } from '../src/lib/auth.js';
 const prisma = new PrismaClient();
 
 const EMAIL = 'demo@teacherdesk.app';
-const PASSWORD = 'Demo12345';
+const PASSWORD = 'Passw0rd123';
 
 const NAMES = [
   '张伟', '王芳', '李娜', '刘洋', '陈静', '杨帆', '赵磊', '黄敏',

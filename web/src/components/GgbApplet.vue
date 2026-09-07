@@ -23,6 +23,8 @@ interface GgbAppletInstance {
   getBase64(callback: (base64: string) => void): void;
   getBase64(): string;
   getPNGBase64(exportScale: number, transparent: boolean, dpi: number): string;
+  setBase64(base64: string, callback?: () => void): void;
+  setPerspective(perspective: string): void;
   remove?(): void;
 }
 
@@ -93,12 +95,20 @@ async function mountApplet() {
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   if (!el.value) return; // could have been unmounted while we were waiting
 
-  // A blank canvas must not pass `ggbBase64` at all (not even omitted-via-
-  // undefined quite does it) — the classic applet otherwise still attempts an
-  // internal "restore last file" load and surfaces a "LoadFileFailed" toast
-  // even though the canvas itself works fine. Building the params object
-  // conditionally, instead of `ggbBase64: props.base64 || undefined`, is what
-  // actually keeps that key off the object for a blank canvas.
+  // The applet is always constructed blank (never passed `ggbBase64` here —
+  // not even omitted-via-undefined quite does it, the classic app otherwise
+  // still attempts an internal "restore last file" load and surfaces a
+  // "LoadFileFailed" toast even though the canvas works fine) and any actual
+  // file content is loaded afterwards via setBase64() in appletOnLoad below.
+  // This is what makes `perspective: 'G'` (graphics-only, no algebra panel)
+  // actually take effect for 展示 mode: GeoGebra's own docs say that
+  // construction param "shouldn't be used with ggbBase64", and passing both
+  // together does exactly that — silently ignoring perspective (confirmed
+  // against the live applet). Calling setPerspective('G') at runtime instead,
+  // after loading a file the normal way, does not work either — that call is
+  // a no-op at the exact moment appletOnLoad fires, for reasons still
+  // unresolved even after long delays. Never combining ggbBase64 with a
+  // perspective param sidesteps needing that at all.
   const params: Record<string, unknown> = {
     // Not 'classic': deployggb.js's own codebase-selection logic (see its
     // source — there is no supported "force full codebase" flag; a
@@ -124,32 +134,54 @@ async function mountApplet() {
     enableRightClick: props.editable,
     enableShiftDragZoom: true,
     showZoomButtons: true,
-    appletOnLoad: () => {
-      if (loadTimeoutId) {
-        clearTimeout(loadTimeoutId);
-        loadTimeoutId = null;
+    // appletOnLoad receives the fully-ready API object as its argument — the
+    // "applet" the `new GGBApplet(...)` constructor returns (what `applet`
+    // below holds until this fires) is only a launcher, not the live API
+    // surface: calling API methods on it either silently no-ops
+    // (setPerspective, in an earlier version of this file) or throws "not a
+    // function" (setBase64, ditto). window.ggbApplet is a third alias to the
+    // same ready object but is unsafe with more than one applet on a page —
+    // the callback argument is the one GeoGebra's own docs recommend, and the
+    // only one confirmed to actually work for both those calls.
+    appletOnLoad: (api: GgbAppletInstance) => {
+      applet = api;
+
+      const finish = () => {
+        // Graphics-only in 展示 mode — no algebra panel eating half the
+        // canvas. Must run *after* the construction is loaded (setBase64
+        // above, or the blank canvas already showing): the construction-time
+        // `perspective` param does not achieve this — GeoGebra's docs say not
+        // to combine it with a file anyway, but even set alone on a blank
+        // canvas it doesn't stick after setBase64 later replaces the
+        // construction. Edit mode keeps the default (graphics + algebra)
+        // since a teacher editing live needs to see/change the formulas.
+        if (!props.editable) api.setPerspective('G');
+        if (loadTimeoutId) {
+          clearTimeout(loadTimeoutId);
+          loadTimeoutId = null;
+        }
+        loading.value = false;
+        emit('ready');
+        observeResize();
+      };
+
+      if (!props.base64) {
+        finish(); // Blank canvas: nothing further to load, the applet is already showing it.
+      } else {
+        api.setBase64(props.base64, finish);
       }
-      loading.value = false;
-      emit('ready');
-      observeResize();
     },
   };
-  // File is handed in as base64 rather than `filename` pointed at our
-  // download URL — see the top-of-file comment for why.
-  if (props.base64) {
-    params.ggbBase64 = props.base64;
-  } else {
-    // Graphics-only perspective for a blank canvas; also part of the
-    // LoadFileFailed workaround above (no construction to load at all).
-    params.perspective = 'G';
-  }
 
+  // This "launcher" object only knows inject() — appletOnLoad above
+  // overwrites `applet` with the real, fully-functional API object once
+  // it's actually ready.
   applet = new window.GGBApplet(params, '6.0');
   applet.inject(containerId);
 
   loadTimeoutId = setTimeout(() => {
     loadTimeoutId = null;
-    if (!loading.value) return; // appletOnLoad already fired first — nothing to do.
+    if (!loading.value) return; // the load callback already fired first — nothing to do.
     loading.value = false;
     error.value = props.base64
       ? '文件加载超时，可能不是有效的 GeoGebra 文件，请用 GeoGebra 官方软件/网站打开并重新保存后再上传'
@@ -252,7 +284,13 @@ defineExpose({
 
 <template>
   <div class="ggb-wrap" :style="{ height: height ?? '520px' }">
-    <div v-if="loading" class="ggb-status hint">GeoGebra 加载中…</div>
+    <div v-if="loading" class="ggb-status hint">
+      <p>GeoGebra 加载中…</p>
+      <p class="ggb-status-sub">
+        首次加载需要从 GeoGebra 官方下载画板资源，视网络情况可能需要几十秒；
+        加载完成后会被浏览器缓存，之后再打开会快很多
+      </p>
+    </div>
     <p v-else-if="error" class="ggb-status error-text">{{ error }}</p>
     <!--
       Always rendered, never v-show/v-if hidden: mountApplet() measures this
@@ -281,8 +319,18 @@ defineExpose({
   position: absolute;
   inset: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  text-align: center;
+  gap: 6px;
+  padding: 0 24px;
+}
+
+.ggb-status-sub {
+  font-size: 12px;
+  color: var(--text-faint);
+  max-width: 360px;
 }
 
 .ggb-canvas { width: 100%; height: 100%; }

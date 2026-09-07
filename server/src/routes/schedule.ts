@@ -4,7 +4,7 @@ import { prisma } from '../db.js';
 import { ApiError } from '../errors.js';
 import { requireUser } from '../app.js';
 import { requireClass, requireSlot } from '../lib/ownership.js';
-import { DEFAULT_SETTINGS } from '../config.js';
+import { config, DEFAULT_SETTINGS } from '../config.js';
 import {
   dateRange,
   formatDate,
@@ -14,6 +14,7 @@ import {
   slotOccursOn,
   weekParity,
 } from '../lib/schedule.js';
+import { startOfLocalDay } from '../lib/timezone.js';
 import {
   DEFAULT_DAY_SCHEDULE,
   lessonPeriodTimes,
@@ -327,8 +328,14 @@ export async function registerScheduleRoutes(app: FastifyInstance) {
           };
         });
 
+      // Compare by the teacher's own local calendar date, not startAt's UTC
+      // date component: an all-day todo is stored as that date's local
+      // midnight (EventDialog.vue), which for any positive-offset timezone
+      // (UTC+8 default included) lands on the *previous* UTC calendar day —
+      // e.g. 2026-09-09 00:00 UTC+8 is 2026-09-08T16:00:00Z. Comparing UTC
+      // dates directly showed a 09-09 todo under 09-08 in the week grid.
       const oneTimeEvents = events
-        .filter((e) => formatDate(e.startAt) === dayStr)
+        .filter((e) => formatDate(startOfLocalDay(e.startAt, settings.timeZone, config.localTzOffsetMinutes)) === dayStr)
         .map((e) => ({
           id: e.id,
           title: e.title,
@@ -346,7 +353,7 @@ export async function registerScheduleRoutes(app: FastifyInstance) {
       // isDone comes from this week's EventOccurrence override if one
       // exists, else the event's own isDone default.
       const recurringOnDay = recurringEvents
-        .filter((e) => recurringEventOccursOn(e, day))
+        .filter((e) => recurringEventOccursOn(e, day, startOfLocalDay(e.startAt, settings.timeZone, config.localTzOffsetMinutes)))
         .map((e) => {
           const projected = projectRecurringEvent(e, day);
           const override = occurrenceIsDone.get(`${e.id}:${dayStr}`);

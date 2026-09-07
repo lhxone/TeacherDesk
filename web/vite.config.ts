@@ -70,4 +70,12 @@ export default defineConfig({
       '/api': { target: 'http://localhost:3000', changeOrigin: true },
     },
   },
+  // Same proxy as dev, so `npm run build && npm run preview` can be used to
+  // manually verify production-only behaviour (the service worker; devOptions
+  // above keeps it disabled under `npm run dev`) against the local API.
+  preview: {
+    proxy: {
+      '/api': { target: 'http://localhost:3000', changeOrigin: true },
+    },
+  },
 });

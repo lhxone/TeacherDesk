@@ -89,12 +89,19 @@ export type RecurringEventLike = {
  * — same weekday, and not before the event's own start date (its first
  * occurrence). Non-recurring events (repeatWeekday null) are handled by a
  * plain date-equality check at the call site instead, same as before.
+ *
+ * `startDay` must be the event's own *local calendar day* (its startAt
+ * projected through the teacher's timezone — see timezone.ts's
+ * startOfLocalDay), not startAt itself: for any positive UTC offset (UTC+8
+ * default included), an all-day todo's local midnight lands on the previous
+ * UTC calendar day, and comparing UTC date components directly would treat
+ * the event as starting a day earlier than the teacher actually picked.
  */
-export function recurringEventOccursOn(event: RecurringEventLike, date: Date): boolean {
+export function recurringEventOccursOn(event: RecurringEventLike, date: Date, startDay: Date): boolean {
   if (event.repeatWeekday == null) return false;
   const day = toUtcDate(date);
   if (isoWeekday(day) !== event.repeatWeekday) return false;
-  return day >= toUtcDate(event.startAt);
+  return day >= toUtcDate(startDay);
 }
 
 /**

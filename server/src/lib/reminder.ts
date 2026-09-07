@@ -168,7 +168,9 @@ async function remindTodos(userId: string, now: Date, windowEnd: Date, lead: num
     const uniqueDays = [...new Map(days.map((d) => [d.getTime(), d])).values()];
 
     for (const day of uniqueDays) {
-      const dueToday = recurring.filter((ev) => recurringEventOccursOn(ev, day));
+      const dueToday = recurring.filter((ev) =>
+        recurringEventOccursOn(ev, day, startOfLocalDayTz(ev.startAt, tz, config.localTzOffsetMinutes)),
+      );
       if (!dueToday.length) continue;
 
       const dayStr = formatDate(day);
