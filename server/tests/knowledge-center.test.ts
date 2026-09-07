@@ -185,7 +185,7 @@ describe('resources: upload lifecycle', () => {
       method: 'POST',
       url: '/api/v1/tags',
       headers: user.auth,
-      payload: { name: '重点' },
+      payload: { name: '重点', scope: 'resource' },
     });
     const tagId = tag.json().data.id;
 
@@ -381,7 +381,12 @@ describe('resources: search and filter', () => {
   });
 
   it('combines full-text search with a tagId/knowledgeNodeId filter instead of one silently winning', async () => {
-    const tag = await app.inject({ method: 'POST', url: '/api/v1/tags', headers: user.auth, payload: { name: '重点' } });
+    const tag = await app.inject({
+      method: 'POST',
+      url: '/api/v1/tags',
+      headers: user.auth,
+      payload: { name: '重点', scope: 'resource' },
+    });
     const tagId = tag.json().data.id;
     const node = await app.inject({
       method: 'POST',

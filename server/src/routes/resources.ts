@@ -407,8 +407,14 @@ function stripExtension(filename: string): string {
   return idx > 0 ? filename.slice(0, idx) : filename;
 }
 
+// Only resource-scoped tags may be attached to a resource — a student tag id
+// (even one this user owns) is a different namespace and must be rejected
+// the same as an id that doesn't exist at all, not silently accepted.
 async function assertOwnedTags(tagIds: string[], userId: string) {
-  for (const id of [...new Set(tagIds)]) await requireTag(id, userId);
+  for (const id of [...new Set(tagIds)]) {
+    const tag = await requireTag(id, userId);
+    if (tag.scope !== 'resource') throw ApiError.forbidden();
+  }
 }
 
 async function assertOwnedKnowledgeNodes(ids: string[], userId: string) {

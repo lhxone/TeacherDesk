@@ -411,7 +411,7 @@ onUnmounted(() => {
         <p class="eyebrow">你的教学积累，值得好好收藏</p>
         <h2>好资料不再散落，<br />好经验不断积累。</h2>
         <p>
-          教材、课件、教案、图片与错题，收进自己的知识中心。用知识点和标签整理，用搜索和收藏快速找回，让每一次备课都有积累可循。
+          教材、课件、教案、图片与错题，收进自己的知识中心。用文件夹和标签整理，用搜索和收藏快速找回，让每一次备课都有积累可循。
         </p>
         <a href="#questions" class="text-link"
           >了解如何开始 <span aria-hidden="true">↗</span></a
@@ -455,7 +455,7 @@ onUnmounted(() => {
           <span class="bookmark" aria-hidden="true">☆</span>
         </div>
         <div class="library-tags">
-          <span>知识点分类</span><span>标签整理</span><span>收藏与检索</span>
+          <span>文件夹分类</span><span>标签整理</span><span>收藏与检索</span>
         </div>
       </div>
     </section>

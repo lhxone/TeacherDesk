@@ -154,9 +154,16 @@ model Student {
   @@map("students")
 }
 
+// scope keeps student tags (班级/学生管理) and resource tags (知识中心)
+// fully separate namespaces despite sharing one table — a teacher can have
+// "课代表" in both without collision, and each UI only ever sees/creates its
+// own scope's rows. Was a single unscoped namespace originally (both used
+// the same tag rows); split via a migration that duplicates any tag used by
+// both features into one row per scope, each keeping its original relations.
 model Tag {
   id        String   @id @default(uuid()) @db.Uuid
   userId    String   @map("user_id") @db.Uuid
+  scope     String   @default("student") @db.VarChar(16)
   name      String   @db.VarChar(32)
   color     String   @default("#10B981") @db.VarChar(16)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -165,7 +172,7 @@ model Tag {
   studentTags  StudentTag[]
   resourceTags ResourceTag[]
 
-  @@unique([userId, name])
+  @@unique([userId, scope, name])
   @@map("tags")
 }
 
