@@ -8,6 +8,7 @@ import ModalDialog from '@/components/ModalDialog.vue';
 import EmptyState from '@/components/EmptyState.vue';
 import UploadDialog from '@/components/UploadDialog.vue';
 import KnowledgeTreeManager from '@/components/KnowledgeTreeManager.vue';
+import GgbApplet from '@/components/GgbApplet.vue';
 
 type SectionKey = 'all' | ResourceType | 'favorite' | 'recent' | 'knowledge' | 'tags';
 
@@ -17,6 +18,7 @@ const SECTIONS: { key: SectionKey; label: string }[] = [
   { key: 'ppt', label: 'PPT' },
   { key: 'lesson_plan', label: '教案' },
   { key: 'image', label: '图片' },
+  { key: 'geogebra', label: 'GeoGebra' },
   { key: 'mistake', label: '错题' },
   { key: 'knowledge', label: '知识点' },
   { key: 'tags', label: '标签' },
@@ -52,16 +54,30 @@ const docxContainer = ref<HTMLElement | null>(null);
 const pptxContainer = ref<HTMLElement | null>(null);
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let pptxPreviewer: any = null;
+// GeoGebra preview: base64 content handed to GgbApplet (read-only), same
+// approach as the classroom tools page — see ToolsView.vue's comment on why
+// it's base64 and not `filename` pointed at the download URL.
+const previewGgbBase64 = ref<string | null>(null);
 
 function clearPreview() {
   if (previewImageUrl.value) URL.revokeObjectURL(previewImageUrl.value);
   if (previewPdfUrl.value) URL.revokeObjectURL(previewPdfUrl.value);
   previewImageUrl.value = null;
   previewPdfUrl.value = null;
+  previewGgbBase64.value = null;
   previewError.value = null;
   if (docxContainer.value) docxContainer.value.innerHTML = '';
   pptxPreviewer?.destroy?.();
   pptxPreviewer = null;
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve((reader.result as string).split(',')[1] ?? '');
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
 }
 
 /** docx via .docx extension OR the OOXML wordprocessingml mimetype (mirrors the backend's own check). */
@@ -74,6 +90,19 @@ function isPptx(r: Resource): boolean {
 
 async function loadPreview(r: Resource) {
   clearPreview();
+  if (r.type === 'geogebra') {
+    previewLoading.value = true;
+    try {
+      const blob = await api.blob(`/resources/${r.id}/download`);
+      previewGgbBase64.value = await blobToBase64(blob);
+    } catch {
+      previewError.value = '预览加载失败';
+    } finally {
+      previewLoading.value = false;
+    }
+    return;
+  }
+
   if (r.type === 'image') {
     previewLoading.value = true;
     try {
@@ -376,6 +405,9 @@ onMounted(() => {
              dynamically-imported renderer mounts into it after nextTick. -->
         <div v-if="previewLoading" class="empty-inline">预览加载中…</div>
         <p v-else-if="previewError" class="error-text">{{ previewError }}</p>
+        <div v-else-if="previewGgbBase64" class="preview-panel preview-ggb">
+          <GgbApplet :base64="previewGgbBase64" :editable="false" height="420px" />
+        </div>
         <div v-else-if="previewImageUrl" class="preview-panel">
           <img :src="previewImageUrl" :alt="detail.title" class="preview-image" />
         </div>
@@ -439,6 +471,7 @@ onMounted(() => {
 
 
 .preview-panel { display: flex; justify-content: center; background: var(--hover-tint); border-radius: var(--radius-sm); overflow: hidden; }
+.preview-ggb { width: 100%; }
 .preview-image { max-width: 100%; max-height: 420px; object-fit: contain; }
 .preview-pdf { width: 100%; height: 480px; border: none; }
 /* docx-preview (inWrapper: false) renders the page content directly with its

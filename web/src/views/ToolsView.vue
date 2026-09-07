@@ -3,11 +3,14 @@ import { computed, onMounted, ref } from 'vue';
 import { api, ApiError, fetchAllPages } from '@/api/client';
 import { useClassStore } from '@/stores/classes';
 import EmptyState from '@/components/EmptyState.vue';
-import type { Envelope, Exam, GroupResult, Paged, Student } from '@/api/types';
+import GgbApplet from '@/components/GgbApplet.vue';
+import ScreenRecorder from '@/components/ScreenRecorder.vue';
+import { resourcesApi } from '@/api/resources';
+import type { Envelope, Exam, GroupResult, Paged, Resource, Student } from '@/api/types';
 
 const classStore = useClassStore();
 
-type Tool = 'lottery' | 'grouping';
+type Tool = 'lottery' | 'grouping' | 'geogebra';
 const tool = ref<Tool>('lottery');
 const classId = ref('');
 const error = ref('');
@@ -136,12 +139,147 @@ async function saveGroups() {
   }
 }
 
+// --- GeoGebra ---
+// Files are Resources with type: 'geogebra' — same store, upload, tagging,
+// search and "最近使用" tracking as every other teaching material in 知识中心
+// (see docs/API.md and resources.ts's PUT .../content, added for this "save
+// after live-editing" case). This view only adds the applet-specific bits:
+// opening one full-screen for classroom display/editing, and Demo recording.
+const ggbFiles = ref<Resource[]>([]);
+const ggbLoading = ref(false);
+const ggbError = ref('');
+const ggbUploading = ref(false);
+const ggbFileInput = ref<HTMLInputElement | null>(null);
+const ggbStageOpen = ref(false);
+const activeGgbFile = ref<Resource | null>(null);
+const activeGgbBase64 = ref('');
+const activeGgbEditable = ref(false);
+const activeGgbLoading = ref(false);
+const ggbApplet = ref<InstanceType<typeof GgbApplet> | null>(null);
+const ggbSaving = ref(false);
+
+async function loadGgbFiles() {
+  ggbLoading.value = true;
+  ggbError.value = '';
+  try {
+    const res = await resourcesApi.list({ type: 'geogebra', pageSize: 100 });
+    ggbFiles.value = res.data;
+  } catch (e) {
+    ggbError.value = e instanceof ApiError ? e.message : '加载 GeoGebra 文件失败';
+  } finally {
+    ggbLoading.value = false;
+  }
+}
+
+async function uploadGgbFile(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+  ggbUploading.value = true;
+  ggbError.value = '';
+  try {
+    await resourcesApi.upload(file, { type: 'geogebra' });
+    await loadGgbFiles();
+  } catch (err) {
+    ggbError.value = err instanceof ApiError ? err.message : '上传失败';
+  } finally {
+    ggbUploading.value = false;
+    input.value = '';
+  }
+}
+
+async function removeGgbFile(f: Resource) {
+  if (!confirm(`删除「${f.title}」？此操作不可恢复`)) return;
+  try {
+    await resourcesApi.remove(f.id);
+    ggbFiles.value = ggbFiles.value.filter((x) => x.id !== f.id);
+  } catch (e) {
+    ggbError.value = e instanceof ApiError ? e.message : '删除失败';
+  }
+}
+
+/** Opens a file in the fullscreen stage. `editable` picks preview vs. live-edit mode. */
+async function openGgbFile(f: Resource, editable: boolean) {
+  activeGgbLoading.value = true;
+  ggbError.value = '';
+  try {
+    const blob = await resourcesApi.fetchBlob(f.id);
+    const base64 = await blobToBase64(blob);
+    await resourcesApi.touch(f.id).catch(() => {});
+    activeGgbFile.value = f;
+    activeGgbBase64.value = base64;
+    activeGgbEditable.value = editable;
+    ggbStageOpen.value = true;
+  } catch (e) {
+    ggbError.value = e instanceof ApiError ? e.message : '打开文件失败';
+  } finally {
+    activeGgbLoading.value = false;
+  }
+}
+
+function openBlankGgbCanvas() {
+  activeGgbFile.value = null;
+  activeGgbBase64.value = '';
+  activeGgbEditable.value = true;
+  ggbStageOpen.value = true;
+}
+
+function closeGgbStage() {
+  ggbStageOpen.value = false;
+  activeGgbFile.value = null;
+  activeGgbBase64.value = '';
+}
+
+/**
+ * Mid-demo switch from 展示 to 编辑, without leaving fullscreen — a teacher
+ * mid-lesson realising they want to tweak the construction shouldn't have to
+ * back out to the file list and reopen. GgbApplet's own watch() on the
+ * `editable` prop already tears down and rebuilds the applet in edit mode, so
+ * flipping this ref is the entire implementation.
+ */
+function switchGgbToEdit() {
+  activeGgbEditable.value = true;
+}
+
+async function saveGgbEdits() {
+  if (!activeGgbFile.value || !ggbApplet.value) return;
+  ggbSaving.value = true;
+  ggbError.value = '';
+  try {
+    const base64 = await ggbApplet.value.getBase64();
+    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+    await resourcesApi.saveContent(activeGgbFile.value.id, new Blob([bytes]), activeGgbFile.value.originalFilename);
+    await loadGgbFiles();
+    alert('已保存');
+  } catch (e) {
+    ggbError.value = e instanceof ApiError ? e.message : '保存失败';
+  } finally {
+    ggbSaving.value = false;
+  }
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve((reader.result as string).split(',')[1] ?? '');
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
 onMounted(async () => {
   await classStore.ensureLoaded();
   if (classStore.items.length) {
     classId.value = classStore.items[0].id;
     await loadClassData();
   }
+  await loadGgbFiles();
 });
 </script>
 
@@ -160,6 +298,9 @@ onMounted(async () => {
       </button>
       <button :class="['tab-btn', { active: tool === 'grouping' }]" @click="tool = 'grouping'">
         👥 随机分组
+      </button>
+      <button :class="['tab-btn', { active: tool === 'geogebra' }]" @click="tool = 'geogebra'">
+        📐 GeoGebra
       </button>
     </nav>
 
@@ -213,7 +354,7 @@ onMounted(async () => {
     </section>
 
     <!-- Grouping -->
-    <section v-else class="stack">
+    <section v-else-if="tool === 'grouping'" class="stack">
       <div class="card">
         <div class="row">
           <div class="field" style="width: 150px">
@@ -272,6 +413,67 @@ onMounted(async () => {
         </div>
       </div>
     </section>
+
+    <!-- GeoGebra -->
+    <section v-else class="stack">
+      <div class="card">
+        <div class="row">
+          <button class="btn btn-primary" :disabled="ggbUploading" @click="ggbFileInput?.click()">
+            {{ ggbUploading ? '上传中…' : '📤 上传 .ggb 文件' }}
+          </button>
+          <button class="btn" @click="openBlankGgbCanvas">✏️ 新建空白画板</button>
+          <input ref="ggbFileInput" type="file" accept=".ggb" hidden @change="uploadGgbFile" />
+        </div>
+        <p class="hint" style="margin-top: 8px">
+          支持上传 GeoGebra 官方 .ggb 文件，课堂上可全屏展示或现场编辑演示
+        </p>
+      </div>
+
+      <p v-if="ggbError" class="error-text">{{ ggbError }}</p>
+
+      <EmptyState v-if="!ggbLoading && !ggbFiles.length" icon="classes" title="还没有 GeoGebra 课件">
+        点击上方按钮上传第一个 .ggb 文件
+      </EmptyState>
+
+      <div v-else class="grid">
+        <div v-for="f in ggbFiles" :key="f.id" class="card ggb-card">
+          <div class="card-title">{{ f.title }}</div>
+          <p class="hint">{{ f.originalFilename }} · {{ formatFileSize(f.fileSize) }}</p>
+          <div class="row" style="margin-top: 10px">
+            <button class="btn btn-sm" :disabled="activeGgbLoading" @click="openGgbFile(f, false)">👁 展示</button>
+            <button class="btn btn-sm" :disabled="activeGgbLoading" @click="openGgbFile(f, true)">✏️ 编辑</button>
+            <button class="btn btn-sm btn-danger" @click="removeGgbFile(f)">删除</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Fullscreen GeoGebra stage: classroom display / live editing -->
+  <div v-if="ggbStageOpen" class="ggb-stage">
+    <header class="ggb-stage-head">
+      <span class="ggb-stage-title">{{ activeGgbFile?.title ?? '空白画板' }}</span>
+      <div class="row">
+        <button v-if="!activeGgbEditable && activeGgbFile" class="btn btn-sm" @click="switchGgbToEdit">
+          ✏️ 切换到编辑
+        </button>
+        <button v-if="activeGgbEditable && activeGgbFile" class="btn btn-sm" :disabled="ggbSaving" @click="saveGgbEdits">
+          {{ ggbSaving ? '保存中…' : '💾 保存' }}
+        </button>
+        <button class="btn btn-sm" @click="closeGgbStage">✕ 退出全屏</button>
+      </div>
+    </header>
+    <div class="ggb-stage-body">
+      <GgbApplet
+        ref="ggbApplet"
+        :base64="activeGgbBase64"
+        :editable="activeGgbEditable"
+        height="100%"
+      />
+    </div>
+    <div class="ggb-stage-record">
+      <ScreenRecorder />
+    </div>
   </div>
 </template>
 
@@ -326,4 +528,32 @@ onMounted(async () => {
 }
 
 .check { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+
+.ggb-card { display: flex; flex-direction: column; }
+
+.ggb-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+}
+
+.ggb-stage-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ggb-stage-title { font-weight: 600; }
+
+.ggb-stage-body { flex: 1; min-height: 0; padding: 8px; }
+
+.ggb-stage-record {
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+}
 </style>

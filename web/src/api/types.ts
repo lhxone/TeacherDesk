@@ -332,7 +332,7 @@ export type GroupResult = {
 
 // ---------- 教学知识中心 (Knowledge Center) ----------
 
-export type ResourceType = 'textbook' | 'ppt' | 'lesson_plan' | 'image' | 'mistake' | 'document' | 'other';
+export type ResourceType = 'textbook' | 'ppt' | 'lesson_plan' | 'image' | 'mistake' | 'document' | 'geogebra' | 'other';
 export type ResourceStatus = 'pending' | 'parsing' | 'ready' | 'failed';
 
 export type KnowledgeNode = {
@@ -393,6 +393,7 @@ export const RESOURCE_TYPE_LABELS: Record<ResourceType, string> = {
   image: '图片',
   mistake: '错题',
   document: '文档',
+  geogebra: 'GeoGebra',
   other: '其他',
 };
 

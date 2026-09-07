@@ -26,7 +26,7 @@ import { saveResourceFile, readResourceFile, deleteResourceFile } from '../lib/r
 import { inferResourceType } from '../lib/resourceParsing.js';
 import { scheduleResourceParse } from '../lib/resourceParseJob.js';
 
-const RESOURCE_TYPES = ['textbook', 'ppt', 'lesson_plan', 'image', 'mistake', 'document', 'other'] as const;
+const RESOURCE_TYPES = ['textbook', 'ppt', 'lesson_plan', 'image', 'mistake', 'document', 'geogebra', 'other'] as const;
 
 const listQuerySchema = z.object({
   type: z.enum(RESOURCE_TYPES).optional(),
@@ -270,6 +270,41 @@ export async function registerResourceRoutes(app: FastifyInstance) {
         `attachment; filename="download"; filename*=UTF-8''${encodeURIComponent(resource.originalFilename)}`,
       )
       .send(buffer);
+  });
+
+  // Replace a resource's file content in place, keeping its id/title/tags/
+  // history stable. Currently only used by the GeoGebra 课堂工具 "save" action
+  // after live-editing a .ggb file on the classroom applet — there is no
+  // re-parse here (isParseable() already excludes .ggb) and lastUsedAt is
+  // bumped the same way download() does.
+  app.put('/resources/:resourceId/content', async (req) => {
+    const userId = requireUser(req);
+    const { resourceId } = z.object({ resourceId: z.string().uuid() }).parse(req.params);
+    const existing = await requireResource(resourceId, userId);
+
+    const file = await req.file({ limits: { fileSize: config.resourceMaxFileSizeBytes, files: 1 } });
+    if (!file) throw ApiError.validation('请上传文件');
+
+    let buffer: Buffer;
+    try {
+      buffer = await file.toBuffer();
+    } catch (err) {
+      if ((err as { code?: string }).code === 'FST_REQ_FILE_TOO_LARGE') {
+        throw ApiError.validation(
+          `文件过大，最大支持 ${Math.floor(config.resourceMaxFileSizeBytes / (1024 * 1024))}MB`,
+        );
+      }
+      throw err;
+    }
+
+    const { relativePath, checksum } = await saveResourceFile(userId, existing.id, existing.originalFilename, buffer);
+    const saved = await prisma.resource.update({
+      where: { id: existing.id },
+      data: { storagePath: relativePath, checksum, fileSize: BigInt(buffer.length), lastUsedAt: new Date() },
+      include: resourceInclude,
+    });
+
+    return { data: serializeResource(saved) };
   });
 
   app.post('/resources/:resourceId/retry', async (req) => {
