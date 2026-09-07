@@ -514,7 +514,7 @@ model Resource {
   id     String @id @default(uuid()) @db.Uuid
   userId String @map("user_id") @db.Uuid
 
-  // textbook / ppt / lesson_plan / image / mistake / document / other
+  // textbook / ppt / lesson_plan / image / mistake / document / geogebra / other
   type    String  @db.VarChar(16)
   title   String  @db.VarChar(255)
   subject String? @db.VarChar(32)

@@ -43,6 +43,7 @@ export type ExtractionResult = {
 /** Resource.type inferred from mimeType/extension, used both for storage bucketing and to pick a parser. */
 export function inferResourceType(mimeType: string, filename: string): string {
   const ext = filename.toLowerCase().split('.').pop() ?? '';
+  if (ext === 'ggb') return 'geogebra';
   if (mimeType.startsWith('image/')) return 'image';
   if (ext === 'pptx' || ext === 'ppt' || mimeType.includes('presentation')) return 'ppt';
   if (ext === 'docx' || ext === 'doc' || mimeType.includes('wordprocessingml') || mimeType === 'application/msword') return 'document';

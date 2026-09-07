@@ -99,6 +99,22 @@ export const resourcesApi = {
 
     return request<Envelope<Resource>>('/resources', { method: 'POST', body: form });
   },
+
+  /** Replace a resource's file content in place (e.g. "save" after live-editing a GeoGebra file). */
+  saveContent(id: string, blob: Blob, filename: string): Promise<Envelope<Resource>> {
+    const form = new FormData();
+    form.append('file', blob, filename);
+    return request<Envelope<Resource>>(`/resources/${id}/content`, { method: 'PUT', body: form });
+  },
+
+  /**
+   * Fetch the file as a Blob without triggering a save-as download — used by
+   * the GeoGebra applet, which needs the raw bytes to open, not a browser
+   * download prompt (see download() above for why a plain URL won't do).
+   */
+  fetchBlob(id: string): Promise<Blob> {
+    return api.blob(`/resources/${id}/download`);
+  },
 };
 
 export const knowledgeNodesApi = {

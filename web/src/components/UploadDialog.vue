@@ -23,7 +23,7 @@ const selectedKnowledgeNodeIds = ref<string[]>([]);
 const uploading = ref(false);
 const error = ref('');
 
-const TYPE_OPTIONS: ResourceType[] = ['textbook', 'ppt', 'lesson_plan', 'image', 'mistake', 'document', 'other'];
+const TYPE_OPTIONS: ResourceType[] = ['textbook', 'ppt', 'lesson_plan', 'image', 'mistake', 'document', 'geogebra', 'other'];
 
 // .doc/.ppt are the legacy binary Office formats (OLE2), not the OOXML
 // zip+XML .docx/.pptx — this project has no parser for them at all (no text
