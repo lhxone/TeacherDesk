@@ -2,14 +2,17 @@
 import { ref } from 'vue';
 import { ApiError } from '@/api/client';
 import { resourcesApi } from '@/api/resources';
-import type { KnowledgeNode, ResourceCollection, ResourceType, Tag } from '@/api/types';
+import type { KnowledgeNode, ResourceType, Tag } from '@/api/types';
 import { RESOURCE_TYPE_LABELS } from '@/api/types';
 import ModalDialog from '@/components/ModalDialog.vue';
 
 const props = defineProps<{
-  collections: ResourceCollection[];
   tags: Tag[];
   knowledgeNodes: KnowledgeNode[];
+  /** The folder currently open in the explorer — the upload always lands here, Explorer-style. */
+  targetCollectionId: string | null;
+  /** Display path for the target folder, e.g. "文件夹 / 高二数学", for the "上传到" line. */
+  targetCollectionLabel: string;
 }>();
 const emit = defineEmits<{ close: []; uploaded: [] }>();
 
@@ -71,6 +74,7 @@ async function submit() {
       type: type.value || undefined,
       subject: subject.value.trim() || undefined,
       grade: grade.value.trim() || undefined,
+      collectionId: props.targetCollectionId ?? undefined,
       tagIds: selectedTagIds.value,
       knowledgeNodeIds: selectedKnowledgeNodeIds.value,
     });
@@ -113,6 +117,8 @@ async function submit() {
           <input v-model="grade" class="input" placeholder="如：七年级" />
         </div>
       </div>
+
+      <p class="hint target-line">📁 上传到：<strong>{{ targetCollectionLabel }}</strong></p>
 
       <div v-if="tags.length" class="field">
         <label>标签</label>
@@ -163,4 +169,6 @@ async function submit() {
 .tag-toggle { border: 1px solid transparent; opacity: 0.55; }
 .tag-toggle.picked { opacity: 1; border-color: currentColor; }
 .warn-text { color: var(--warning); }
+.target-line { background: var(--hover-tint); padding: 8px 10px; border-radius: var(--radius-sm); }
+.target-line strong { color: var(--text); }
 </style>
