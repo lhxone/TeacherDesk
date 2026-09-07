@@ -32,7 +32,12 @@ const listQuerySchema = z.object({
   type: z.enum(RESOURCE_TYPES).optional(),
   subject: z.string().optional(),
   grade: z.string().optional(),
-  collectionId: z.string().uuid().optional(),
+  // A real UUID scopes to that folder; the literal "none" scopes to
+  // unfiled resources (collectionId IS NULL) — e.g. Knowledge Center's
+  // root/"全部文件夹" view, which must show only resources not filed into any
+  // folder, not every resource regardless of folder (that's what omitting
+  // this param entirely still means, unchanged).
+  collectionId: z.union([z.string().uuid(), z.literal('none')]).optional(),
   tagId: z.string().uuid().optional(),
   knowledgeNodeId: z.string().uuid().optional(),
   status: z.enum(['pending', 'parsing', 'ready', 'failed']).optional(),
@@ -75,7 +80,7 @@ export async function registerResourceRoutes(app: FastifyInstance) {
       ...(q.type ? { type: q.type } : {}),
       ...(q.subject ? { subject: q.subject } : {}),
       ...(q.grade ? { grade: q.grade } : {}),
-      ...(q.collectionId ? { collectionId: q.collectionId } : {}),
+      ...(q.collectionId === 'none' ? { collectionId: null } : q.collectionId ? { collectionId: q.collectionId } : {}),
       ...(q.status ? { status: q.status } : {}),
       ...(q.favorite ? { isFavorite: true } : {}),
       ...(q.tagId ? { tags: { some: { tagId: q.tagId } } } : {}),
@@ -437,7 +442,8 @@ async function searchResources(
   if (q.type) { filterClauses.push(`r.type = $${i++}::varchar`); params.push(q.type); }
   if (q.subject) { filterClauses.push(`r.subject = $${i++}::varchar`); params.push(q.subject); }
   if (q.grade) { filterClauses.push(`r.grade = $${i++}::varchar`); params.push(q.grade); }
-  if (q.collectionId) { filterClauses.push(`r.collection_id = $${i++}::uuid`); params.push(q.collectionId); }
+  if (q.collectionId === 'none') { filterClauses.push('r.collection_id IS NULL'); }
+  else if (q.collectionId) { filterClauses.push(`r.collection_id = $${i++}::uuid`); params.push(q.collectionId); }
   if (q.status) { filterClauses.push(`r.status = $${i++}::varchar`); params.push(q.status); }
   if (q.favorite) { filterClauses.push('r.is_favorite = true'); }
   if (q.tagId) {

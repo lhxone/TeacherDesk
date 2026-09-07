@@ -79,9 +79,20 @@ const byParentId = computed(() => {
   return map;
 });
 
-/** Subfolders of the folder currently open, shown alongside its files — hidden while a search is active (search is flat/global). */
+// Favorite/tag/knowledge-point browsing searches the whole tree regardless
+// of which folder is "open" (same as the search box) — so unlike plain
+// folder browsing, it must not also imply "and show this folder's
+// subfolders", which would visually claim a scope the file listing doesn't
+// actually honor. Root-folder browsing itself doesn't hit this: it's not a
+// global-scope view, it's "the root folder", which does have real
+// subfolders to show.
+const isGlobalFilterView = computed(
+  () => filterMode.value === 'favorite' || !!activeTagId.value || !!activeKnowledgeNodeId.value,
+);
+
+/** Subfolders of the folder currently open, shown alongside its files — hidden during a global-scope view (search, favorites, tag/knowledge-point filters) since those aren't scoped to "this folder" at all. */
 const childFolders = computed(() =>
-  searchTerm.value.trim() ? [] : byParentId.value.get(activeCollectionId.value) ?? [],
+  searchTerm.value.trim() || isGlobalFilterView.value ? [] : byParentId.value.get(activeCollectionId.value) ?? [],
 );
 
 /** Root-to-current chain of folders, for the breadcrumb bar. */
@@ -262,8 +273,19 @@ async function loadResources() {
       // Search is flat/global — it ignores "current folder" the same way
       // Explorer's search box searches the whole tree, not just one folder.
       query.q = searchTerm.value.trim();
+    } else if (isGlobalFilterView.value) {
+      // Favorites/tags/knowledge-points: whole tree, same as search — leave
+      // collectionId unset entirely (matches every resource regardless of
+      // which folder, or no folder, it's filed into).
     } else if (activeCollectionId.value) {
       query.collectionId = activeCollectionId.value;
+    } else {
+      // Root folder ("全部文件夹"): must mean *unfiled* resources only, the
+      // same way a real folder view only shows what's directly inside it —
+      // not "every resource anywhere", which is what omitting collectionId
+      // here used to (incorrectly) return, duplicating anything already
+      // filed into a folder onto the root view too.
+      query.collectionId = 'none';
     }
     if (filterMode.value === 'favorite') query.favorite = true;
     else if (filterMode.value !== 'none') query.type = filterMode.value;
