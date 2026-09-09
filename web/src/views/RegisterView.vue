@@ -134,7 +134,7 @@ async function submit() {
   align-items: center;
   justify-content: center;
   padding: 20px;
-  background: linear-gradient(160deg, #eff6ff, #f8fafc 60%);
+  background: var(--bg);
 }
 
 .auth-card {
