@@ -93,6 +93,7 @@ onMounted(async () => {
     <nav class="quick-links">
       <RouterLink :to="{ name: 'tools' }" class="quick-link">课堂工具</RouterLink>
       <RouterLink :to="{ name: 'knowledge-center' }" class="quick-link">知识中心</RouterLink>
+      <RouterLink :to="{ name: 'inbox' }" class="quick-link">收集箱</RouterLink>
     </nav>
 
     <div v-if="loading" class="empty">加载中…</div>

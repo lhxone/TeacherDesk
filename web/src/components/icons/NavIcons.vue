@@ -2,7 +2,7 @@
 // Line-style nav icons (stroke = currentColor) so they inherit the tab's
 // text color and adapt to light/dark theme and the active state for free —
 // no separate icon assets or color props needed.
-defineProps<{ name: 'home' | 'classes' | 'schedule' | 'tools' | 'knowledge' | 'settings' | 'logo' }>();
+defineProps<{ name: 'home' | 'classes' | 'schedule' | 'tools' | 'knowledge' | 'inbox' | 'settings' | 'logo' }>();
 </script>
 
 <template>
@@ -79,6 +79,19 @@ defineProps<{ name: 'home' | 'classes' | 'schedule' | 'tools' | 'knowledge' | 's
   >
     <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H12v18H6.5A2.5 2.5 0 0 1 4 18.5v-13Z" />
     <path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H12v18h5.5a2.5 2.5 0 0 0 2.5-2.5v-13Z" />
+  </svg>
+
+  <svg
+    v-else-if="name === 'inbox'"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <path d="m4 4-2 10v5a1 1 0 0 0 1 1h18a1 1 0 0 0 1-1v-5L20 4Z" />
+    <path d="M2 14h6l2 3h4l2-3h6M8 8h8" />
   </svg>
 
   <svg

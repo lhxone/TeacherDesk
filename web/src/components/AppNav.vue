@@ -6,16 +6,13 @@ import NavIcons from '@/components/icons/NavIcons.vue';
 const auth = useAuthStore();
 const router = useRouter();
 
-// Mobile bottom tabs mirror PRD §3.8 (首页 / 班级 / 课堂工具 / 成绩 / 我的),
-// except the 4th slot is 知识中心 instead of 课堂工具 — 课堂工具 (抽签/分组/
-// 座位) is still one tap away from the home page's quick-links row, and desk
-// -bound tasks like browsing/uploading teaching resources benefit more from
-// a persistent bottom-tab slot on mobile.
+// Keep collection surveys directly reachable on both desktop and mobile.
 const links = [
   { name: 'home', label: '首页', icon: 'home' as const },
   { name: 'classes', label: '班级', icon: 'classes' as const },
   { name: 'schedule', label: '日程', icon: 'schedule' as const },
   { name: 'knowledge-center', label: '知识', icon: 'knowledge' as const },
+  { name: 'inbox', label: '收集箱', icon: 'inbox' as const },
   { name: 'settings', label: '我的', icon: 'settings' as const },
 ];
 
@@ -40,6 +37,7 @@ async function logout() {
         :to="{ name: l.name }"
         class="side-link"
         active-class="active"
+        :class="{ active: l.name === 'inbox' && router.currentRoute.value.path.startsWith('/inbox') }"
       >
         <span class="icon"><NavIcons :name="l.icon" /></span>
         <span>{{ l.label }}</span>
@@ -60,6 +58,7 @@ async function logout() {
       :to="{ name: l.name }"
       class="tab"
       active-class="active"
+      :class="{ active: l.name === 'inbox' && router.currentRoute.value.path.startsWith('/inbox') }"
     >
       <span class="tab-icon"><NavIcons :name="l.icon" /></span>
       <span class="tab-label">{{ l.label }}</span>

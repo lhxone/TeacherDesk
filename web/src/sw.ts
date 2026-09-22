@@ -37,6 +37,10 @@ self.addEventListener('activate', (event: ExtendableEvent) => {
 // visitor the previous teacher's identity.
 registerRoute(/\/api\/v1\/auth\//, new NetworkOnly());
 
+// Forms, answers and attachments may contain identity information. Always
+// request live data, including publication status on shared public forms.
+registerRoute(/\/api\/v1\/(?:public\/)?surveys(?:\/|$)/, new NetworkOnly());
+
 // Offline reads for PRD §3.8 / AC-16. These responses contain student names,
 // phone numbers and scores, so: NetworkFirst (never StaleWhileRevalidate) with a
 // short TTL, and the `td-` cache-name prefix so purgeApiCaches() can wipe it on

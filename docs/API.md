@@ -1013,6 +1013,37 @@ Query：`format`（`csv` | `xlsx`，默认 `csv`）、`examIds`（逗号分隔�
 
 ---
 
+## 15. 收集箱
+
+所有路径使用 `/api/v1` 前缀。`/surveys` 下的接口需要教师登录且仅允许访问本人数据；两个 `/public/surveys` 接口无需登录。所有响应禁止缓存。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/surveys` | 本人的调查列表，包含 `responseCount` |
+| POST | `/surveys` | 创建草稿：`{title, description, fields}` |
+| GET | `/surveys/{id}` | 调查详情 |
+| PATCH | `/surveys/{id}` | 更新标题、说明、字段或 `status`，必须携带当前 `version` |
+| DELETE | `/surveys/{id}` | 软删除，公开链接同时失效 |
+| GET | `/surveys/{id}/responses?page=1&pageSize=20` | 答卷分页，包含字段快照、答案及附件元数据 |
+| GET | `/surveys/{id}/files/{fileId}` | 下载本人调查的附件 |
+| GET | `/public/surveys/{token}` | 获取已发布表单的 `title, description, version, fields` |
+| POST | `/public/surveys/{token}/responses` | 匿名提交，使用下述 multipart 格式 |
+
+`status` 为 `draft`（草稿）、`published`（收集中）或 `closed`（已停止）。
+`fields` 为最多 50 个字段的有序数组，每项含 `id, type, label, required`，可选 `placeholder, options`。
+`type` 支持 `text, textarea, phone, idcard, number, date, select, file`；`options` 为单选字符串数组。
+字段 ID 在编辑与排序时保持稳定，已有答卷保留提交时的字段快照。
+
+匿名提交必须使用 `multipart/form-data`，即使没有附件：
+
+- `version`：获取表单时的整数版本号，以字符串传递。
+- `answers`：JSON 对象，键为非附件字段 ID、值为字符串。
+- `file:<字段ID>`：对应附件字段的文件，每字段最多一个。
+
+最多 5 个附件，每文件 10 MiB。成功返回 `201 {data: {id}}`，不会公开答案或存储路径。
+版本冲突返回 409，需刷新表单；未发布、已停止或失效链接不可提交。
+更多使用和部署说明见 [收集箱](SURVEYS.md)。
+
 ## 附录 A：接口索引
 
 | 模块 | 方法与路径 |
@@ -1033,6 +1064,7 @@ Query：`format`（`csv` | `xlsx`，默认 `csv`）、`examIds`（逗号分隔�
 | Push | `GET /push/vapid-public-key`、`POST|DELETE /push/subscriptions`、`POST /push/test` |
 | Devices | `GET /devices`、`DELETE /devices/subscriptions/{id}`、`DELETE /devices/sessions/{id}` |
 | Weather | `GET /weather` |
+| Surveys | `GET|POST /surveys`、`GET|PATCH|DELETE /surveys/{id}`、`GET /surveys/{id}/responses`、`GET /surveys/{id}/files/{fileId}`、`GET /public/surveys/{token}`、`POST /public/surveys/{token}/responses` |
 | Health | `GET /health` |
 
 ## 附录 B：前端离线缓存策略（PWA）
@@ -1045,6 +1077,7 @@ Service Worker 的运行时缓存**只按 URL 存储，不区分账号**。学�
 | `/auth/*` | **NetworkOnly** | 绝不缓存；缓存的 `/auth/me` 会把上一位教师的身份交给下一位 |
 | `/classes`、`/students`、`/tags`、`/schedule`、`/events`、`/seating-charts` | **NetworkFirst**，TTL 12 小时 | 有网时永远以服务端为准，仅断网时回落缓存（AC-16） |
 | `/analytics/*` | **NetworkOnly** | 派生数据，重算成本低、离线价值小，不落盘 |
+| `/surveys`、`/surveys/*`、`/public/surveys/*` | **NetworkOnly** | 表单、个人信息和附件不缓存，实时检查发布状态 |
 | 所有写操作（POST/PUT/PATCH/DELETE） | 不缓存 | 离线时前端拦截并提示，不入队（v1） |
 
 **不使用 StaleWhileRevalidate**：该策略会先返回缓存再后台更新，在同一浏览器
