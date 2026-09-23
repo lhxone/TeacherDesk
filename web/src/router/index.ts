@@ -6,6 +6,7 @@ const routes = [
   { path: '/about', name: 'about', component: () => import('@/views/AboutView.vue'), meta: { public: true } },
   { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue'), meta: { public: true } },
   { path: '/register', name: 'register', component: () => import('@/views/RegisterView.vue'), meta: { public: true } },
+  { path: '/s/:token', name: 'public-survey', component: () => import('@/views/PublicSurveyView.vue'), meta: { public: true } },
   { path: '/', name: 'home', component: () => import('@/views/HomeView.vue') },
   { path: '/classes', name: 'classes', component: () => import('@/views/ClassesView.vue') },
   { path: '/classes/:classId', name: 'class-detail', component: () => import('@/views/ClassDetailView.vue'), props: true },
@@ -17,6 +18,10 @@ const routes = [
   { path: '/analytics/class/:classId', name: 'class-analytics', component: () => import('@/views/ClassAnalyticsView.vue'), props: true },
   { path: '/analytics/student/:studentId', name: 'student-analytics', component: () => import('@/views/StudentAnalyticsView.vue'), props: true },
   { path: '/knowledge', name: 'knowledge-center', component: () => import('@/views/KnowledgeCenterView.vue') },
+  { path: '/inbox', name: 'inbox', component: () => import('@/views/InboxView.vue') },
+  { path: '/inbox/new', name: 'survey-new', component: () => import('@/views/SurveyEditorView.vue') },
+  { path: '/inbox/:id/edit', name: 'survey-edit', component: () => import('@/views/SurveyEditorView.vue') },
+  { path: '/inbox/:id/responses', name: 'survey-responses', component: () => import('@/views/SurveyResponsesView.vue') },
   { path: '/settings', name: 'settings', component: () => import('@/views/SettingsView.vue') },
   { path: '/devices', name: 'devices', component: () => import('@/views/DevicesView.vue') },
   { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('@/views/NotFoundView.vue') },
@@ -29,6 +34,9 @@ export const router = createRouter({
 });
 
 router.beforeEach(async (to) => {
+  // Shared forms are independent of any teacher session on this device.
+  if (to.name === 'public-survey') return true;
+
   const auth = useAuthStore();
 
   // Restore the session once, so a page refresh does not bounce to /login.

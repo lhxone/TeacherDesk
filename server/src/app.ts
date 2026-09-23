@@ -24,6 +24,7 @@ import { registerWeatherRoutes } from './routes/weather.js';
 import { registerKnowledgeNodeRoutes } from './routes/knowledgeNodes.js';
 import { registerResourceCollectionRoutes } from './routes/resourceCollections.js';
 import { registerResourceRoutes } from './routes/resources.js';
+import { registerSurveyRoutes } from './routes/surveys.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -37,6 +38,13 @@ const PUBLIC_ROUTES = new Set([
   'POST:/api/v1/auth/login',
   'POST:/api/v1/auth/refresh',
   'GET:/api/v1/health',
+]);
+
+// Only these two routes accept anonymous form access. In particular, response
+// lists and attachments remain protected even if their URL contains a token.
+const PUBLIC_SURVEY_ROUTES = new Set([
+  'GET:/api/v1/public/surveys/:token',
+  'POST:/api/v1/public/surveys/:token/responses',
 ]);
 
 export function requireUser(req: FastifyRequest): string {
@@ -93,8 +101,15 @@ export async function buildApp(): Promise<FastifyInstance> {
   }
 
   // Authentication: populate req.userId, reject protected routes without a token.
-  app.addHook('onRequest', async (req) => {
+  app.addHook('onRequest', async (req, reply) => {
     const key = `${req.method}:${req.routeOptions?.url ?? req.url.split('?')[0]}`;
+    if (/^\/api\/v1\/(?:public\/)?surveys(?:\/|$)/.test(req.url.split('?')[0])) {
+      reply.header('Cache-Control', 'no-store');
+      reply.header('Pragma', 'no-cache');
+      reply.header('X-Content-Type-Options', 'nosniff');
+    }
+    // An old signed-in session must never prevent opening an anonymous form.
+    if (PUBLIC_SURVEY_ROUTES.has(key)) return;
     const header = req.headers.authorization;
 
     if (header?.startsWith('Bearer ')) {
@@ -180,6 +195,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(registerKnowledgeNodeRoutes, { prefix });
   await app.register(registerResourceCollectionRoutes, { prefix });
   await app.register(registerResourceRoutes, { prefix });
+  await app.register(registerSurveyRoutes, { prefix });
 
   return app;
 }

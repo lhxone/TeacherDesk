@@ -17,7 +17,7 @@ useTheme();
 registerSW({
   immediate: true,
   onRegisteredSW() {
-    void syncPushSubscription();
+    if (!window.location.pathname.startsWith('/s/')) void syncPushSubscription();
   },
 });
 
@@ -30,7 +30,7 @@ app.use(router);
 // this browser cannot be served the previous one's data.
 setAuthFailureHandler(() => {
   void purgeApiCaches();
-  router.push({ name: 'login' });
+  if (router.currentRoute.value.name !== 'public-survey') router.push({ name: 'login' });
 });
 
 app.mount('#app');

@@ -43,6 +43,7 @@ model User {
   resources           Resource[]
   resourceTags        ResourceTag[]
   resourceCollections ResourceCollection[]
+  surveys             Survey[]
 
   @@map("users")
 }
@@ -598,4 +599,56 @@ model ResourceChunk {
   @@unique([resourceId, ordinal])
   @@index([resourceId, pageNumber])
   @@map("resource_chunks")
+}
+
+// 收集箱: anonymous write-only public forms, with immutable field snapshots on
+// each response so teachers can safely change a published form later.
+model Survey {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  title       String    @db.VarChar(120)
+  description String    @default("")
+  status      String    @default("draft") @db.VarChar(16)
+  publicToken String    @unique @map("public_token") @db.VarChar(64)
+  version     Int       @default(1)
+  fields      Json      @default("[]")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  responses SurveyResponse[]
+
+  @@index([userId, deletedAt, createdAt])
+  @@map("surveys")
+}
+
+model SurveyResponse {
+  id        String   @id @default(uuid()) @db.Uuid
+  surveyId  String   @map("survey_id") @db.Uuid
+  version   Int
+  fields    Json
+  answers   Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  survey Survey       @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  files  SurveyFile[]
+
+  @@index([surveyId, createdAt])
+  @@map("survey_responses")
+}
+
+model SurveyFile {
+  id               String   @id @default(uuid()) @db.Uuid
+  responseId       String   @map("response_id") @db.Uuid
+  fieldId          String   @map("field_id") @db.VarChar(64)
+  originalFilename String   @map("original_filename") @db.VarChar(255)
+  fileSize         Int      @map("file_size")
+  storagePath      String   @map("storage_path") @db.VarChar(512)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  response SurveyResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
+
+  @@unique([responseId, fieldId])
+  @@map("survey_files")
 }
